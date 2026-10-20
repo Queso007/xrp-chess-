@@ -1,0 +1,113 @@
+"""XRPL escrow helpers: stake-deposit detection and payout submission.
+
+Deposits are matched on-ledger by (destination tag, exact drop amount, sender
+address). The destination tag is unique per game (32-bit), so deposits can
+never be confused between games even on a busy escrow wallet.
+
+Payouts are plain XRPL Payment transactions signed by the escrow wallet.
+"""
+from __future__ import annotations
+
+import time
+
+from xrpl.clients import JsonRpcClient
+from xrpl.models.requests import AccountTx
+from xrpl.models.transactions import Payment
+from xrpl.transaction import submit_and_wait
+from xrpl.wallet import Wallet
+
+
+def _recent_escrow_txs(client: JsonRpcClient, escrow_address: str,
+                       limit: int = 100) -> list[dict]:
+    """Most recent transactions involving the escrow address (newest first)."""
+    req = AccountTx(account=escrow_address, limit=limit, forward=False)
+    resp = client.request(req)
+    entries = resp.result.get("transactions", [])
+    txs = []
+    for entry in entries:
+        tx = entry.get("tx") or entry.get("tx_json") or {}
+        if tx:
+            txs.append(tx)
+    return txs
+
+
+def poll_deposits(
+    client: JsonRpcClient,
+    escrow_address: str,
+    dest_tag: int,
+    expected_drops: int,
+    player_addresses: list[str],
+    timeout_sec: int = 600,
+    poll_interval: int = 5,
+) -> dict[str, bool]:
+    """Block until every player has staked exactly expected_drops to the
+    escrow wallet with this game's destination tag.
+
+    Only native XRP Payments from one of the player addresses count; IOU
+    amounts and wrong amounts are ignored. Returns {address: True} for all
+    players. Raises TimeoutError if the deadline passes first.
+    """
+    expected = set(player_addresses)
+    confirmed: set[str] = set()
+    deadline = time.time() + timeout_sec
+
+    while time.time() < deadline:
+        try:
+            txs = _recent_escrow_txs(client, escrow_address)
+        except Exception:
+            txs = []  # transient node hiccup: retry next poll
+        for tx in txs:
+            if tx.get("TransactionType") != "Payment":
+                continue
+            if tx.get("DestinationTag") != dest_tag:
+                continue
+            sender = tx.get("Account")
+            if sender not in expected or sender in confirmed:
+                continue
+            amount = tx.get("Amount")
+            if isinstance(amount, dict):
+                continue  # issued currency, not XRP — ignore
+            if amount == str(expected_drops):
+                confirmed.add(sender)
+        if confirmed == expected:
+            return {addr: True for addr in confirmed}
+        time.sleep(poll_interval)
+
+    missing = sorted(expected - confirmed)
+    raise TimeoutError(f"Deposit wait timed out. No stake seen from: {missing}")
+
+
+def send_payouts(
+    client: JsonRpcClient,
+    seed: str,
+    payouts: list[tuple[str, int, str]],
+    dev_mode: bool = False,
+) -> dict[str, str]:
+    """Submit one Payment per payout entry. Returns {address: tx_hash}.
+
+    Zero/negative payouts are skipped (e.g. a forfeiting abandoner).
+    In dev_mode nothing touches the ledger; fake hashes are returned.
+    submit_and_wait blocks until each transaction is validated.
+    """
+    result: dict[str, str] = {}
+    if dev_mode:
+        for i, (address, drops, _memo) in enumerate(payouts):
+            if drops > 0:
+                result[address] = f"DEV_MODE_TX_{i}"
+        return result
+
+    wallet = Wallet.from_seed(seed)
+    for address, drops, memo in payouts:
+        if drops <= 0:
+            continue
+        memo_hex = memo.encode("utf-8").hex().upper()
+        payment = Payment(
+            account=wallet.address,
+            destination=address,
+            amount=str(drops),  # drops, as a decimal string
+            memos=[{"Memo": {"MemoData": memo_hex}}],
+        )
+        # autofill handles fee/sequence/last-ledger; waits for validation.
+        resp = submit_and_wait(payment, client, wallet)
+        result[address] = resp.result["hash"]
+    return result

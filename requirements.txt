@@ -1,0 +1,7 @@
+# Chess xApp backend dependencies (Python 3.10+)
+flask>=3.0
+flask-socketio>=5.3
+xrpl-py>=3.0
+python-chess>=1.10
+requests>=2.31
+eventlet>=0.33
