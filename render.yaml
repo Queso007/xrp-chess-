@@ -1,0 +1,23 @@
+# Render blueprint — deploy via "New > Blueprint" and point at your repo.
+# Render's free tier works for testing; use Starter ($7/mo) for production.
+services:
+  - type: web
+    name: xrp-chess
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/levels
+    envVars:
+      - key: XRPL_NETWORK
+        value: mainnet
+      - key: DEV_MODE
+        value: "false"
+      - key: ESCROW_ADDRESS
+        sync: false
+      - key: ESCROW_SEED
+        sync: false
+      - key: OPERATOR_ADDRESS
+        sync: false
+      - key: XAMAN_API_KEY
+        sync: false
+      - key: XAMAN_API_SECRET
+        sync: false
