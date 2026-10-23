@@ -131,7 +131,7 @@ function render(s) {
   $('nameTop').textContent = opp ? `Opponent (${opp.color || '?'}) · ${short(opp.address)}` : 'Waiting for opponent…';
 
   // Deposit panel
-  const showDeposit = s.state === 'depositing' || (s.state === 'waiting');
+    const showDeposit = !s.practice && (s.state === 'depositing' || s.state === 'waiting');
   $('depositCard').classList.toggle('hidden', !showDeposit);
   if (showDeposit) {
     $('depAmount').textContent = s.stake_xrp + ' XRP';
