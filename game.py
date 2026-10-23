@@ -90,7 +90,8 @@ class Game:
         self.level_key = level_key
         self.level_label = level_cfg.get("label", level_key)
         # Integer drops only: stake_xrp is a whole number of XRP.
-        self.stake_drops = int(level_cfg["stake_xrp"]) * 1_000_000
+                self.stake_drops = int(level_cfg["stake_xrp"]) * 1_000_000
+        self.practice = self.stake_drops == 0
         self.clock_ms = int(level_cfg["clock_seconds"]) * 1000
         self.increment_ms = int(level_cfg["increment_seconds"]) * 1000
         self.operator_address = operator_address
