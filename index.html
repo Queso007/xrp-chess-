@@ -110,8 +110,8 @@ async function init() {
     const d = document.createElement('div');
     d.className = 'level';
     d.innerHTML = `<h3>${lv.label}</h3>
-      <div class="stake">${lv.stake_xrp} XRP</div>
-      <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment</div>
+            <div class="stake">${lv.stake_xrp > 0 ? lv.stake_xrp + ' XRP' : 'FREE'}</div>
+      <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment${lv.stake_xrp > 0 ? '' : ' · no deposit, just play'}</div>
       <button data-level="${key}">Create game</button>`;
     box.appendChild(d);
   }
