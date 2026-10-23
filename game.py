@@ -117,6 +117,12 @@ class Game:
             self.state = PLAYING
             self.clock_last_update = time.time()
             return
+                if self.practice:
+            for player in self.players.values():
+                player["deposited"] = True
+            self.state = PLAYING
+            self.clock_last_update = time.time()
+            return
         self.state = DEPOSITING
         self.deposit_deadline = time.time() + self.deposit_timeout
         self.draw_offer_by: str | None = None  # color awaiting opponent response
