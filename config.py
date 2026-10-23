@@ -60,11 +60,19 @@ LEVELS = {
         "clock_seconds": 10 * 60,
         "increment_seconds": 5,
     },
-        "master": {
+            "master": {
         "label": "Master",
         "stake_xrp": 100,
         "clock_seconds": 5 * 60,
         "increment_seconds": 3,
+    },
+    "practice": {
+        "label": "Practice",
+        "stake_xrp": 0,
+        "clock_seconds": 10 * 60,
+        "increment_seconds": 5,
+    },
+}
     },
     "practice": {
         "label": "Practice",
