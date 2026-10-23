@@ -119,7 +119,7 @@ function initBoard() {
 
 function render(s) {
   state = s; lastSync = Date.now();
-  $('stakeLabel').textContent = s.stake_xrp + ' XRP';
+    $('stakeLabel').textContent = s.practice ? 'No stake' : s.stake_xrp + ' XRP';
   $('levelLabel').textContent = s.level_label;
   board.position(s.fen, false);
 
