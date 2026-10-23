@@ -110,7 +110,14 @@ class Game:
         self.players: dict[str, dict] = {}
         self.clocks = {"white": self.clock_ms, "black": self.clock_ms}
         self.clock_last_update: float | None = None
-        self.deposit_deadline: float | None = None
+                if self.practice:
+            for player in self.players.values():
+                player["deposited"] = True
+            self.state = PLAYING
+            self.clock_last_update = time.time()
+            return
+        self.state = DEPOSITING
+        self.deposit_deadline = time.time() + self.deposit_timeout
         self.draw_offer_by: str | None = None  # color awaiting opponent response
         self.winner: str | None = None        # "white" / "black"
         self.leaver: str | None = None        # color that abandoned (single)
