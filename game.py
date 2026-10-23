@@ -395,7 +395,9 @@ class Game:
         the sum of all payouts always equals the total staked (2*S), except
         END_CANCELLED which refunds only what was actually deposited.
         """
-        S = self.stake_drops
+                S = self.stake_drops
+        if S == 0:
+            return []
         op = self.operator_address
         payouts: list[tuple[str, int, str]] = []
 
