@@ -373,9 +373,9 @@ function render(s) {
     waiting: s.players.length < 2 ? 'Waiting for an opponent to join…' : 'Waiting…',
     depositing: 'Stake confirmed on-ledger to begin. Clocks start when both deposits land.',
     playing: (s.turn === myColor ? 'Your move' : "Opponent's move"),
-    ended: 'Game over — settling payouts…'
+        ended: s.practice ? 'Game over' : 'Game over — settling payouts…'
   }[s.state];
-  $('status').textContent = status + (s.draw_offer_by === myColor ? ' (draw offered)' : '');
+  $('status').textContent = status + (s.draw_offer_by && s.draw_offer_by === myColor ? ' (draw offered)' : '');
 }
 
 // Local clock interpolation between server syncs (server authoritative).
