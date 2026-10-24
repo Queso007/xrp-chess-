@@ -73,7 +73,6 @@ LEVELS = {
         "increment_seconds": 5,
     },
 }
-
 def stake_drops(level_key: str) -> int:
     """Stake for a level, in drops. Integer math only — never floats."""
     return LEVELS[level_key]["stake_xrp"] * 1_000_000
