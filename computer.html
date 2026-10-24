@@ -72,6 +72,7 @@
     <div id="board"></div>
     <div id="status">Loading engine…</div>
     <div id="moves"></div>
+    <div id="engineNote" class="muted"></div>
     <p class="muted">Tap a piece, then tap where it goes. Promotion auto-queens. <a href="/">← Back to lobby</a></p>
   </div>
 </div>
@@ -91,6 +92,7 @@ let game = new Chess();
 let board = null;
 let engine = null;
 let engineReady = false;
+let engineMode = 'stockfish'; // 'stockfish' | 'builtin'
 let engineThinking = false;
 let playerColor = 'white'; // 'white' | 'black'
 let gameActive = false;
@@ -138,10 +140,17 @@ function updateStatus() {
 }
 
 function engineMove() {
-  if (!gameActive || !engineReady || engineThinking) return;
+  if (!gameActive || engineThinking || game.game_over()) return;
   const turn = game.turn();
   const yourTurn = (turn === 'w' && playerColor === 'white') || (turn === 'b' && playerColor === 'black');
-  if (yourTurn || game.game_over()) return;
+  if (yourTurn) return;
+  if (engineMode === 'builtin') {
+    engineThinking = true;
+    updateStatus();
+    window.setTimeout(function () { builtinMove(); engineThinking = false; }, 150);
+    return;
+  }
+  if (!engineReady) return;
   const diff = DIFFS[$('difficulty').value];
   engineThinking = true;
   engine.postMessage('setoption name Skill Level value ' + diff.skill);
@@ -150,6 +159,7 @@ function engineMove() {
 }
 
 function onEngineMessage(e) {
+  if (engineMode !== 'stockfish') return;
   const msg = typeof e.data === 'string' ? e.data : '';
   if (msg === 'uciok') { engineReady = true; updateStatus(); engineMove(); return; }
   if (msg.indexOf('bestmove') === 0) {
@@ -164,18 +174,110 @@ function onEngineMessage(e) {
   }
 }
 
+const PIECE_VAL = { p: 100, n: 320, b: 330, r: 500, q: 900, k: 0 };
+
+// Piece-square tables, White's perspective, first row = rank 8.
+// Black pieces use the vertically mirrored index.
+const PST = {
+  p: [0,0,0,0,0,0,0,0, 50,50,50,50,50,50,50,50, 10,10,20,30,30,20,10,10, 5,5,10,25,25,10,5,5, 0,0,0,20,20,0,0,0, 5,-5,-10,0,0,-10,-5,5, 5,10,10,-20,-20,10,10,5, 0,0,0,0,0,0,0,0],
+  n: [-50,-40,-30,-30,-30,-30,-40,-50, -40,-20,0,0,0,0,-20,-40, -30,0,10,15,15,10,0,-30, -30,5,15,20,20,15,5,-30, -30,0,15,20,20,15,0,-30, -30,5,10,15,15,10,5,-30, -40,-20,0,5,5,0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50],
+  b: [-20,-10,-10,-10,-10,-10,-10,-20, -10,0,0,0,0,0,0,-10, -10,0,5,10,10,5,0,-10, -10,5,5,10,10,5,5,-10, -10,0,10,10,10,10,0,-10, -10,10,10,10,10,10,10,-10, -10,5,0,0,0,0,5,-10, -20,-10,-10,-10,-10,-10,-10,-20],
+  r: [0,0,0,0,0,0,0,0, 5,10,10,10,10,10,10,5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, 0,0,0,5,5,0,0,0],
+  q: [-20,-10,-10,-5,-5,-10,-10,-20, -10,0,0,0,0,0,0,-10, -10,0,5,5,5,5,0,-10, -5,0,5,5,5,5,0,-5, 0,0,5,5,5,5,0,-5, -10,5,5,5,5,5,0,-10, -10,0,5,0,0,0,0,-10, -20,-10,-10,-5,-5,-10,-10,-20],
+  k: [-30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30, -20,-30,-30,-40,-40,-30,-30,-20, -10,-20,-20,-20,-20,-20,-20,-10, 20,20,0,0,0,0,20,20, 20,30,10,0,0,10,30,20]
+};
+
+function evaluateBoard() {
+  let score = 0;
+  const rows = game.board();
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const sq = rows[r][c];
+      if (!sq) continue;
+      const idx = sq.color === 'w' ? r * 8 + c : (7 - r) * 8 + c;
+      const v = PIECE_VAL[sq.type] + PST[sq.type][idx];
+      score += sq.color === 'w' ? v : -v;
+    }
+  }
+  return game.turn() === 'w' ? score : -score;
+}
+
+function orderMoves(moves) {
+  return moves.sort(function (a, b) {
+    return (b.captured ? PIECE_VAL[b.captured] : 0) - (a.captured ? PIECE_VAL[a.captured] : 0);
+  });
+}
+
+function negamax(depth, alpha, beta, ply) {
+  if (game.game_over()) {
+    if (game.in_checkmate()) return -100000 + ply;
+    return 0;
+  }
+  if (depth === 0) return evaluateBoard();
+  let best = -Infinity;
+  const moves = orderMoves(game.moves({ verbose: true }));
+  for (let i = 0; i < moves.length; i++) {
+    game.move(moves[i]);
+    const sc = -negamax(depth - 1, -beta, -alpha, ply + 1);
+    game.undo();
+    if (sc > best) best = sc;
+    if (best > alpha) alpha = best;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
+function builtinMove() {
+  const diff = $('difficulty').value;
+  const depth = diff === 'hard' ? 3 : 2;
+  const moves = orderMoves(game.moves({ verbose: true }));
+  if (moves.length === 0) { updateStatus(); return; }
+  if (diff === 'easy' && Math.random() < 0.35) {
+    game.move(moves[Math.floor(Math.random() * moves.length)]);
+  } else {
+    let best = -Infinity;
+    let bestMove = moves[0];
+    for (let i = 0; i < moves.length; i++) {
+      game.move(moves[i]);
+      const sc = -negamax(depth - 1, -Infinity, Infinity, 1);
+      game.undo();
+      if (sc > best) { best = sc; bestMove = moves[i]; }
+    }
+    game.move(bestMove);
+  }
+  board.position(game.fen());
+  renderMoves();
+  updateStatus();
+}
+
+function useBuiltinEngine(note) {
+  if (engineMode === 'builtin') return;
+  engineMode = 'builtin';
+  engineReady = false;
+  if (engine) { try { engine.terminate(); } catch (err) {} engine = null; }
+  $('engineNote').textContent = note;
+  updateStatus();
+  engineMove();
+}
+
 function startEngine() {
+  engineMode = 'stockfish';
   try {
     engine = new Worker('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.0/stockfish.js');
   } catch (err) {
-    setStatus('Engine could not start in this browser — try Brave or Chrome.');
+    useBuiltinEngine('Playing with the built-in brain — this browser blocked the Stockfish download.');
     return;
   }
   engine.onmessage = onEngineMessage;
   engine.onerror = function () {
-    setStatus('Engine could not start in this browser — try Brave or Chrome.');
+    useBuiltinEngine('Playing with the built-in brain — Stockfish failed to start here.');
   };
   engine.postMessage('uci');
+  window.setTimeout(function () {
+    if (engineMode === 'stockfish' && !engineReady) {
+      useBuiltinEngine('Playing with the built-in brain — Stockfish took too long to load here.');
+    }
+  }, 10000);
 }
 
 function newGame() {
@@ -188,7 +290,7 @@ function newGame() {
   gameActive = true;
   engineThinking = false;
   renderMoves();
-  if (engineReady) { updateStatus(); engineMove(); }
+  if (engineReady || engineMode === 'builtin') { updateStatus(); engineMove(); }
   else setStatus('Loading engine…');
 }
 
@@ -222,7 +324,8 @@ function squareFromEl(el) {
 }
 
 function onSquareTap(sq) {
-  if (!gameActive || !engineReady || engineThinking || game.game_over()) return;
+  if (!gameActive || engineThinking || game.game_over()) return;
+  if (engineMode === 'stockfish' && !engineReady) return;
   const turn = game.turn();
   const yourTurn = (turn === 'w' && playerColor === 'white') || (turn === 'b' && playerColor === 'black');
   if (!yourTurn) return;
