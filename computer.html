@@ -25,6 +25,9 @@
   .row { display:flex; gap:10px; flex-wrap:wrap; }
   .row button { flex:1; }
   #board { width:100%; max-width:480px; margin:0 auto 12px; }
+  #board .square-55d63 { position:relative; }
+  #board .square-55d63.selected-square { box-shadow:inset 0 0 0 3px var(--accent); }
+  #board .move-dot { position:absolute; left:50%; top:50%; width:28%; height:28%; margin:-14% 0 0 -14%; border-radius:50%; background:rgba(20,20,20,.35); pointer-events:none; }
   #status { text-align:center; font-weight:700; min-height:1.4em; }
   #status.thinking { color:var(--accent); }
   #moves { color:var(--muted); font-size:.9rem; line-height:1.6; word-break:break-word; min-height:1.6em; }
@@ -69,7 +72,7 @@
     <div id="board"></div>
     <div id="status">Loading engine…</div>
     <div id="moves"></div>
-    <p class="muted">Promotion auto-queens. <a href="/">← Back to lobby</a></p>
+    <p class="muted">Tap a piece, then tap where it goes. Promotion auto-queens. <a href="/">← Back to lobby</a></p>
   </div>
 </div>
 
@@ -111,6 +114,7 @@ function updateStatus() {
   if (!gameActive) return;
   if (game.game_over()) {
     gameActive = false;
+    clearSelection();
     if (game.in_checkmate()) {
       const winnerWhite = game.turn() === 'b';
       const youWon = (winnerWhite && playerColor === 'white') || (!winnerWhite && playerColor === 'black');
@@ -178,6 +182,7 @@ function newGame() {
   const choice = $('color').value;
   playerColor = choice === 'random' ? (Math.random() < 0.5 ? 'white' : 'black') : choice;
   game.reset();
+  clearSelection();
   board.orientation(playerColor);
   board.start();
   gameActive = true;
@@ -187,33 +192,66 @@ function newGame() {
   else setStatus('Loading engine…');
 }
 
-function onDragStart(source, piece) {
-  if (!gameActive || !engineReady || engineThinking || game.game_over()) return false;
+let selectedSquare = null;
+
+function squareEl(sq) {
+  return $('#board [data-square="' + sq + '"]');
+}
+
+function clearSelection() {
+  selectedSquare = null;
+  $('#board .square-55d63').removeClass('selected-square');
+  $('#board .move-dot').remove();
+}
+
+function selectSquare(sq) {
+  clearSelection();
+  selectedSquare = sq;
+  squareEl(sq).addClass('selected-square');
+  game.moves({ square: sq, verbose: true }).forEach(function (m) {
+    squareEl(m.to).append('<span class="move-dot"></span>');
+  });
+}
+
+function squareFromEl(el) {
+  const $el = $(el).closest('[data-square]');
+  if ($el.length) return $el.attr('data-square');
+  const cls = ($(el).attr('class') || '') + ' ' + ($(el).closest('.square-55d63').attr('class') || '');
+  const m = cls.match(/square-([a-h][1-8])/);
+  return m ? m[1] : null;
+}
+
+function onSquareTap(sq) {
+  if (!gameActive || !engineReady || engineThinking || game.game_over()) return;
   const turn = game.turn();
-  if ((turn === 'w' && piece.search(/^b/) !== -1) || (turn === 'b' && piece.search(/^w/) !== -1)) return false;
   const yourTurn = (turn === 'w' && playerColor === 'white') || (turn === 'b' && playerColor === 'black');
-  if (!yourTurn) return false;
-}
-
-function onDrop(source, target) {
-  const move = game.move({ from: source, to: target, promotion: 'q' });
-  if (move === null) return 'snapback';
-  renderMoves();
-  updateStatus();
-  window.setTimeout(engineMove, 150);
-}
-
-function onSnapEnd() {
-  board.position(game.fen());
+  if (!yourTurn) return;
+  const piece = game.get(sq);
+  const myColor = playerColor === 'white' ? 'w' : 'b';
+  if (selectedSquare) {
+    if (sq === selectedSquare) { clearSelection(); return; }
+    if (piece && piece.color === myColor) { selectSquare(sq); return; }
+    const move = game.move({ from: selectedSquare, to: sq, promotion: 'q' });
+    clearSelection();
+    if (move === null) return;
+    board.position(game.fen());
+    renderMoves();
+    updateStatus();
+    window.setTimeout(engineMove, 150);
+    return;
+  }
+  if (piece && piece.color === myColor) selectSquare(sq);
 }
 
 board = Chessboard('board', {
-  draggable: true,
+  draggable: false,
   position: 'start',
-  pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
-  onDragStart: onDragStart,
-  onDrop: onDrop,
-  onSnapEnd: onSnapEnd
+  pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+});
+
+$('#board').on('click', '.square-55d63', function () {
+  const sq = squareFromEl(this);
+  if (sq) onSquareTap(sq);
 });
 
 $('newBtn').onclick = newGame;
@@ -222,6 +260,7 @@ $('resignBtn').onclick = function () {
   if (!gameActive || game.game_over()) return;
   gameActive = false;
   engineThinking = false;
+  clearSelection();
   setStatus('You resigned — computer wins.');
 };
 $('difficulty').onchange = newGame;
