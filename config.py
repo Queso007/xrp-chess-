@@ -73,16 +73,7 @@ LEVELS = {
         "increment_seconds": 5,
     },
 }
-    },
-    "practice": {
-        "label": "Practice",
-        "stake_xrp": 0,
-        "clock_seconds": 10 * 60,
-        "increment_seconds": 5,
-    },
-
-    },
-}
+    
 
 
 def stake_drops(level_key: str) -> int:
