@@ -211,7 +211,7 @@ socket.on('game_over', data => {
   $('status').textContent = 'Game over.';
 });
 
-$('resignBtn').onclick = () => { if (confirm('Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
+$('resignBtn').onclick = () => { if (confirm(state && state.practice ? 'Resign this practice game?' : 'Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
 $('drawBtn').onclick = () => socket.emit('offer_draw', {game_id: gameId, address: myAddress});
 $('acceptDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: true});
 $('declineDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: false});
