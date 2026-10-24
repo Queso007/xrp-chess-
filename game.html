@@ -19,6 +19,8 @@
   .clock.active .time { color:var(--accent); }
   .clock.low .time { color:var(--danger); }
   #board { width:100%; max-width:520px; margin:0 auto; }
+  #board .square-55d63 { position:relative; }
+  #board .square-55d63.selected-square { box-shadow:inset 0 0 0 3px var(--accent); }
   .controls { display:flex; gap:10px; margin:14px 0; }
   button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:12px 16px; font-size:.95rem; font-weight:700; cursor:pointer; flex:1; }
   button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
@@ -46,6 +48,7 @@
 
   <div class="clock" id="clockTop"><div><div class="name" id="nameTop">Opponent</div></div><div class="time" id="timeTop">--:--</div></div>
   <div id="board"></div>
+  <p class="muted" style="text-align:center;margin:6px 0">Tap a piece, then tap where it goes.</p>
   <div class="clock" id="clockBottom"><div><div class="name" id="nameBottom">You</div></div><div class="time" id="timeBottom">--:--</div></div>
 
   <div id="status">Connecting…</div>
@@ -96,30 +99,75 @@ function fmt(ms) {
 }
 function short(a) { return a ? a.slice(0, 6) + '…' + a.slice(-4) : ''; }
 
-function onDrop(source, target) {
-  if (!state || state.state !== 'playing') return 'snapback';
+let selectedSquare = null;
+
+function squareEl(sq) {
+  return document.querySelector('#board [data-square="' + sq + '"]');
+}
+
+function clearSelection() {
+  selectedSquare = null;
+  document.querySelectorAll('#board .square-55d63').forEach(function (el) { el.classList.remove('selected-square'); });
+}
+
+function selectSquare(sq) {
+  clearSelection();
+  selectedSquare = sq;
+  const el = squareEl(sq);
+  if (el) el.classList.add('selected-square');
+}
+
+function squareFromEl(el) {
+  const sqEl = el.closest ? el.closest('[data-square]') : null;
+  if (sqEl) return sqEl.getAttribute('data-square');
+  const m = (el.className || '').match(/square-([a-h][1-8])/);
+  return m ? m[1] : null;
+}
+
+function sendMove(source, target) {
   const pos = board.position();
   const piece = pos[source];
   let uci = source + target;
   // Pawn reaching the last rank must promote: default to queen.
-  // (Server validates; any illegal choice snaps back on next sync.)
+  // (Server validates; any illegal choice is rejected, not moved.)
   if (piece && piece[1] === 'P' && (target[1] === '8' || target[1] === '1')) uci += 'q';
   socket.emit('move', {game_id: gameId, address: myAddress, uci});
-  return 'snapback'; // server is authoritative; position updates on game_state
+}
+
+function onSquareTap(sq) {
+  if (!state || state.state !== 'playing' || state.turn !== myColor) return;
+  const pos = board.position();
+  const piece = pos[sq];
+  const myLetter = myColor === 'white' ? 'w' : 'b';
+  if (selectedSquare) {
+    if (sq === selectedSquare) { clearSelection(); return; }
+    if (piece && piece[0] === myLetter) { selectSquare(sq); return; }
+    sendMove(selectedSquare, sq);
+    clearSelection();
+    return;
+  }
+  if (piece && piece[0] === myLetter) selectSquare(sq);
 }
 
 function initBoard() {
   board = Chessboard('board', {
     position: 'start',
-    draggable: true,
-    onDrop: onDrop,
-        pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+    draggable: false,
+    pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+  });
+  document.getElementById('board').addEventListener('click', function (e) {
+    const t = e.target;
+    const sqEl = t.closest ? t.closest('.square-55d63') : null;
+    if (!sqEl) return;
+    const sq = squareFromEl(sqEl);
+    if (sq) onSquareTap(sq);
   });
 }
 
 function render(s) {
   state = s; lastSync = Date.now();
-    $('stakeLabel').textContent = s.practice ? 'No stake' : s.stake_xrp + ' XRP';
+  clearSelection();
+  $('stakeLabel').textContent = s.practice ? 'No stake' : s.stake_xrp + ' XRP';
   $('levelLabel').textContent = s.level_label;
   board.position(s.fen, false);
 
@@ -130,8 +178,8 @@ function render(s) {
   $('nameBottom').textContent = 'You' + (myColor ? ` (${myColor})` : '');
   $('nameTop').textContent = opp ? `Opponent (${opp.color || '?'}) · ${short(opp.address)}` : 'Waiting for opponent…';
 
-  // Deposit panel
-    const showDeposit = !s.practice && (s.state === 'depositing' || s.state === 'waiting');
+  // Deposit panel (paid games only — practice games never stake)
+  const showDeposit = !s.practice && (s.state === 'depositing' || s.state === 'waiting');
   $('depositCard').classList.toggle('hidden', !showDeposit);
   if (showDeposit) {
     $('depAmount').textContent = s.stake_xrp + ' XRP';
@@ -153,229 +201,7 @@ function render(s) {
     waiting: s.players.length < 2 ? 'Waiting for an opponent to join…' : 'Waiting…',
     depositing: 'Stake confirmed on-ledger to begin. Clocks start when both deposits land.',
     playing: (s.turn === myColor ? 'Your move' : "Opponent's move"),
-    ended: 'Game over — settling payouts…'
-  }[s.state];
-  $('status').textContent = status + (s.draw_offer_by === myColor ? ' (draw offered)' : '');
-}
-
-// Local clock interpolation between server syncs (server authoritative).
-setInterval(() => {
-  if (!state || state.state !== 'playing') return;
-  const elapsed = Date.now() - lastSync;
-  const c = {...state.clocks_ms};
-  c[state.turn] = Math.max(0, c[state.turn] - elapsed);
-  paintClocks(c, state.turn);
-}, 250);
-
-function paintClocks(c, turn) {
-  const topIsWhite = board.orientation() === 'white';
-  const topColor = topIsWhite ? 'black' : 'white';
-  const botColor = topIsWhite ? 'white' : 'black';
-  const paint = (el, tEl, color) => {
-    $(tEl).textContent = fmt(c[color]);
-    $(el).classList.toggle('active', turn === color);
-    $(el).classList.toggle('low', c[color] < 60000);
-  };
-  paint('clockTop', 'timeTop', topColor);
-  paint('clockBottom', 'timeBottom', botColor);
-}
-
-socket.on('connect', () => {
-  $('status').textContent = 'Joining game…';
-  socket.emit('join_game', {game_id: gameId, address: myAddress});
-  setInterval(() => socket.emit('heartbeat', {game_id: gameId, address: myAddress}), 15000);
-});
-socket.on('game_state', render);
-socket.on('move_result', r => { if (!r.ok && !r.ended) $('status').textContent = 'Move rejected: ' + r.error; });
-socket.on('error', e => { $('status').textContent = 'Error: ' + (e.message || e); });
-socket.on('deposit_timeout', () => { $('status').textContent = 'Deposit window expired — game cancelled, stakes refunded.'; });
-socket.on('settlement_error', e => { $('status').textContent = 'Payout error: ' + e.error + ' — contact the operator.'; });
-socket.on('game_over', data => {
-  $('resultCard').classList.remove('hidden');
-  $('resultTitle').textContent = data.reason_text || 'Game over';
-  let extra = '';
-    if (data.reason === 'abandon_forfeit') extra = 'Your opponent abandoned and forfeited.';
-  if (!data.payouts.length) extra = 'Free game — no XRP was at stake.';
-  $('resultReason').textContent = extra;
-  document.querySelector('table.payouts').style.display = data.payouts.length ? '' : 'none';
-  const tb = $('payoutRows'); tb.innerHTML = '';
-  for (const p of data.payouts) {
-    const tr = document.createElement('tr');
-    const who = p.address === myAddress ? 'You' : short(p.address);
-    const link = p.explorer_url ? `<a href="${p.explorer_url}" target="_blank">view tx</a>` : (p.tx_hash || '');
-    tr.innerHTML = `<td>${who}<br><span class="muted">${p.memo}</span></td><td>${p.xrp}</td><td>${link}</td>`;
-    tb.appendChild(tr);
-  }
-  $('gameControls').classList.add('hidden');
-  $('drawResponse').classList.add('hidden');
-  $('status').textContent = 'Game over.';
-});
-
-$('resignBtn').onclick = () => { if (confirm(state && state.practice ? 'Resign this practice game?' : 'Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
-$('drawBtn').onclick = () => socket.emit('offer_draw', {game_id: gameId, address: myAddress});
-$('acceptDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: true});
-$('declineDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: false});
-
-initBoard();
-</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chess xApp — Game</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
-<style>
-  :root { --bg:#0f1420; --card:#1a2233; --accent:#f5b301; --text:#e8ecf4; --muted:#8b93a7; --danger:#e5484d; --good:#3dd68c; }
-  * { box-sizing:border-box; }
-  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,sans-serif; margin:0; padding:16px; }
-  .wrap { max-width:560px; margin:0 auto; }
-  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-  .topbar a { color:var(--muted); text-decoration:none; }
-  .stake { color:var(--accent); font-weight:700; }
-  .clock { background:var(--card); border-radius:10px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; margin:8px 0; }
-  .clock .name { font-size:.85rem; color:var(--muted); }
-  .clock .time { font-size:1.5rem; font-weight:800; font-variant-numeric:tabular-nums; }
-  .clock.active .time { color:var(--accent); }
-  .clock.low .time { color:var(--danger); }
-  #board { width:100%; max-width:520px; margin:0 auto; }
-  .controls { display:flex; gap:10px; margin:14px 0; }
-  button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:12px 16px; font-size:.95rem; font-weight:700; cursor:pointer; flex:1; }
-  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
-  button.danger { background:transparent; color:var(--danger); border:1px solid var(--danger); }
-  button:disabled { opacity:.4; cursor:default; }
-  .card { background:var(--card); border-radius:12px; padding:16px; margin:12px 0; }
-  .card h3 { margin:0 0 10px; font-size:1rem; }
-  .mono { font-family:monospace; font-size:.8rem; word-break:break-all; }
-  .muted { color:var(--muted); font-size:.85rem; }
-  .ok { color:var(--good); } .warn { color:var(--accent); } .bad { color:var(--danger); }
-  .hidden { display:none; }
-  table.payouts { width:100%; border-collapse:collapse; font-size:.85rem; }
-  table.payouts td, table.payouts th { padding:8px 6px; border-bottom:1px solid #2c3650; text-align:left; }
-  table.payouts a { color:var(--accent); }
-  #status { text-align:center; color:var(--muted); margin:10px 0; min-height:1.4em; }
-  .steps li { margin:6px 0; }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="topbar">
-    <a href="/">← Lobby</a>
-    <div><span class="stake" id="stakeLabel"></span> · <span id="levelLabel" class="muted"></span></div>
-  </div>
-
-  <div class="clock" id="clockTop"><div><div class="name" id="nameTop">Opponent</div></div><div class="time" id="timeTop">--:--</div></div>
-  <div id="board"></div>
-  <div class="clock" id="clockBottom"><div><div class="name" id="nameBottom">You</div></div><div class="time" id="timeBottom">--:--</div></div>
-
-  <div id="status">Connecting…</div>
-
-  <div class="card hidden" id="depositCard">
-    <h3>Stake your XRP to start</h3>
-    <ul class="steps muted" id="depositSteps">
-      <li>Send exactly <b class="stake" id="depAmount"></b> to the escrow wallet:</li>
-    </ul>
-    <p class="mono" id="depEscrow"></p>
-    <p>Destination tag: <b class="mono" id="depTag"></b> <span class="muted">(required — this links your payment to this game)</span></p>
-    <p class="muted" id="depProgress">Waiting for both deposits…</p>
-  </div>
-
-  <div class="controls" id="gameControls">
-    <button class="ghost" id="drawBtn">Offer draw</button>
-    <button class="danger" id="resignBtn">Resign</button>
-  </div>
-  <div class="controls hidden" id="drawResponse">
-    <button id="acceptDraw">Accept draw</button>
-    <button class="ghost" id="declineDraw">Decline</button>
-  </div>
-
-  <div class="card hidden" id="resultCard">
-    <h3 id="resultTitle">Game over</h3>
-    <p class="muted" id="resultReason"></p>
-    <table class="payouts"><thead><tr><th>To</th><th>XRP</th><th></th></tr></thead><tbody id="payoutRows"></tbody></table>
-  </div>
-</div>
-
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-<script>
-const $ = id => document.getElementById(id);
-const gameId = new URLSearchParams(location.search).get('g');
-const myAddress = sessionStorage.getItem('cx_address');
-if (!gameId) location.href = '/';
-if (!myAddress) location.href = '/';
-
-const socket = io();
-let board = null, myColor = null, state = null, lastSync = 0;
-
-function fmt(ms) {
-  ms = Math.max(0, ms);
-  const s = Math.ceil(ms / 1000);
-  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-}
-function short(a) { return a ? a.slice(0, 6) + '…' + a.slice(-4) : ''; }
-
-function onDrop(source, target) {
-  if (!state || state.state !== 'playing') return 'snapback';
-  const pos = board.position();
-  const piece = pos[source];
-  let uci = source + target;
-  // Pawn reaching the last rank must promote: default to queen.
-  // (Server validates; any illegal choice snaps back on next sync.)
-  if (piece && piece[1] === 'P' && (target[1] === '8' || target[1] === '1')) uci += 'q';
-  socket.emit('move', {game_id: gameId, address: myAddress, uci});
-  return 'snapback'; // server is authoritative; position updates on game_state
-}
-
-function initBoard() {
-  board = Chessboard('board', {
-    position: 'start',
-    draggable: true,
-    onDrop: onDrop,
-        pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
-  });
-}
-
-function render(s) {
-  state = s; lastSync = Date.now();
-  $('stakeLabel').textContent = s.stake_xrp + ' XRP';
-  $('levelLabel').textContent = s.level_label;
-  board.position(s.fen, false);
-
-  const me = s.players.find(p => p.address === myAddress);
-  const opp = s.players.find(p => p.address !== myAddress);
-  myColor = me && me.color;
-  if (myColor) board.orientation(myColor);
-  $('nameBottom').textContent = 'You' + (myColor ? ` (${myColor})` : '');
-  $('nameTop').textContent = opp ? `Opponent (${opp.color || '?'}) · ${short(opp.address)}` : 'Waiting for opponent…';
-
-  // Deposit panel
-    const showDeposit = !s.practice && (s.state === 'depositing' || s.state === 'waiting');
-  $('depositCard').classList.toggle('hidden', !showDeposit);
-  if (showDeposit) {
-    $('depAmount').textContent = s.stake_xrp + ' XRP';
-    $('depEscrow').textContent = s.escrow_address || '(dev mode — no real escrow)';
-    $('depTag').textContent = s.dest_tag;
-    const got = s.players.filter(p => p.deposited).length;
-    $('depProgress').innerHTML = got === 2
-      ? '<span class="ok">Both stakes confirmed — starting!</span>'
-      : `Deposits confirmed: <b>${got}/2</b> — waiting for both…`;
-  }
-
-  // Draw offer UI
-  const offerForMe = s.draw_offer_by && s.draw_offer_by !== myColor;
-  $('drawResponse').classList.toggle('hidden', !offerForMe);
-  $('drawBtn').disabled = s.state !== 'playing' || !!s.draw_offer_by;
-  $('resignBtn').disabled = s.state !== 'playing';
-
-  const status = {
-    waiting: s.players.length < 2 ? 'Waiting for an opponent to join…' : 'Waiting…',
-    depositing: 'Stake confirmed on-ledger to begin. Clocks start when both deposits land.',
-    playing: (s.turn === myColor ? 'Your move' : "Opponent's move"),
-        ended: s.practice ? 'Game over' : 'Game over — settling payouts…'
+    ended: s.practice ? 'Game over' : 'Game over — settling payouts…'
   }[s.state];
   $('status').textContent = status + (s.draw_offer_by && s.draw_offer_by === myColor ? ' (draw offered)' : '');
 }
@@ -413,11 +239,14 @@ socket.on('error', e => { $('status').textContent = 'Error: ' + (e.message || e)
 socket.on('deposit_timeout', () => { $('status').textContent = 'Deposit window expired — game cancelled, stakes refunded.'; });
 socket.on('settlement_error', e => { $('status').textContent = 'Payout error: ' + e.error + ' — contact the operator.'; });
 socket.on('game_over', data => {
+  clearSelection();
   $('resultCard').classList.remove('hidden');
   $('resultTitle').textContent = data.reason_text || 'Game over';
   let extra = '';
   if (data.reason === 'abandon_forfeit') extra = 'Your opponent abandoned and forfeited.';
+  if (!data.payouts.length) extra = 'Free game — no XRP was at stake.';
   $('resultReason').textContent = extra;
+  document.querySelector('table.payouts').style.display = data.payouts.length ? '' : 'none';
   const tb = $('payoutRows'); tb.innerHTML = '';
   for (const p of data.payouts) {
     const tr = document.createElement('tr');
@@ -431,7 +260,7 @@ socket.on('game_over', data => {
   $('status').textContent = 'Game over.';
 });
 
-$('resignBtn').onclick = () => { if (confirm('Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
+$('resignBtn').onclick = () => { if (confirm(state && state.practice ? 'Resign this practice game?' : 'Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
 $('drawBtn').onclick = () => socket.emit('offer_draw', {game_id: gameId, address: myAddress});
 $('acceptDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: true});
 $('declineDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: false});
