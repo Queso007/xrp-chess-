@@ -90,8 +90,8 @@ class Game:
         self.level_key = level_key
         self.level_label = level_cfg.get("label", level_key)
         # Integer drops only: stake_xrp is a whole number of XRP.
-                        self.stake_drops = int(level_cfg["stake_xrp"]) * 1_000_000
-        self.practice = self.stake_drops == 0
+        self.stake_drops = int(level_cfg["stake_xrp"]) * 1_000_000
+        # Zero-stake games are practice: no deposits, no escrow, no payouts.
         self.practice = self.stake_drops == 0
         self.clock_ms = int(level_cfg["clock_seconds"]) * 1000
         self.increment_ms = int(level_cfg["increment_seconds"]) * 1000
@@ -111,20 +111,7 @@ class Game:
         self.players: dict[str, dict] = {}
         self.clocks = {"white": self.clock_ms, "black": self.clock_ms}
         self.clock_last_update: float | None = None
-                if self.practice:
-            for player in self.players.values():
-                player["deposited"] = True
-            self.state = PLAYING
-            self.clock_last_update = time.time()
-            return
-                if self.practice:
-            for player in self.players.values():
-                player["deposited"] = True
-            self.state = PLAYING
-            self.clock_last_update = time.time()
-            return
-        self.state = DEPOSITING
-        self.deposit_deadline = time.time() + self.deposit_timeout
+        self.deposit_deadline: float | None = None
         self.draw_offer_by: str | None = None  # color awaiting opponent response
         self.winner: str | None = None        # "white" / "black"
         self.leaver: str | None = None        # color that abandoned (single)
@@ -180,6 +167,15 @@ class Game:
         random.shuffle(colors)
         for player, color in zip(self.players.values(), colors):
             player["color"] = color
+        if self.practice:
+            # Practice games skip the deposit phase entirely: nothing is
+            # staked, the escrow watcher never runs for them, and play
+            # starts as soon as the second player joins.
+            for player in self.players.values():
+                player["deposited"] = True
+            self.state = PLAYING
+            self.clock_last_update = time.time()
+            return
         self.state = DEPOSITING
         self.deposit_deadline = time.time() + self.deposit_timeout
 
@@ -395,8 +391,10 @@ class Game:
         the sum of all payouts always equals the total staked (2*S), except
         END_CANCELLED which refunds only what was actually deposited.
         """
-                S = self.stake_drops
+        S = self.stake_drops
         if S == 0:
+            # Practice game: nothing was staked, so nothing is ever paid
+            # out — on any end path (win, draw, abandon, cancel).
             return []
         op = self.operator_address
         payouts: list[tuple[str, int, str]] = []
@@ -451,7 +449,7 @@ class Game:
             "level": self.level_key,
             "level_label": self.level_label,
             "stake_xrp": self.stake_drops // 1_000_000,
-                        "stake_drops": self.stake_drops,
+            "stake_drops": self.stake_drops,
             "practice": self.practice,
             "state": self.state,
             "dest_tag": self.dest_tag,
