@@ -297,28 +297,34 @@ function newGame() {
 let selectedSquare = null;
 
 function squareEl(sq) {
-  return $('#board [data-square="' + sq + '"]');
+  return document.querySelector('#board [data-square="' + sq + '"]');
 }
 
 function clearSelection() {
   selectedSquare = null;
-  $('#board .square-55d63').removeClass('selected-square');
-  $('#board .move-dot').remove();
+  document.querySelectorAll('#board .square-55d63').forEach(function (el) { el.classList.remove('selected-square'); });
+  document.querySelectorAll('#board .move-dot').forEach(function (el) { el.remove(); });
 }
 
 function selectSquare(sq) {
   clearSelection();
   selectedSquare = sq;
-  squareEl(sq).addClass('selected-square');
+  const el = squareEl(sq);
+  if (el) el.classList.add('selected-square');
   game.moves({ square: sq, verbose: true }).forEach(function (m) {
-    squareEl(m.to).append('<span class="move-dot"></span>');
+    const target = squareEl(m.to);
+    if (target) {
+      const dot = document.createElement('span');
+      dot.className = 'move-dot';
+      target.appendChild(dot);
+    }
   });
 }
 
 function squareFromEl(el) {
-  const $el = $(el).closest('[data-square]');
-  if ($el.length) return $el.attr('data-square');
-  const cls = ($(el).attr('class') || '') + ' ' + ($(el).closest('.square-55d63').attr('class') || '');
+  const sqEl = el.closest ? el.closest('[data-square]') : null;
+  if (sqEl) return sqEl.getAttribute('data-square');
+  const cls = el.className || '';
   const m = cls.match(/square-([a-h][1-8])/);
   return m ? m[1] : null;
 }
@@ -352,8 +358,11 @@ board = Chessboard('board', {
   pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
 });
 
-$('#board').on('click', '.square-55d63', function () {
-  const sq = squareFromEl(this);
+document.getElementById('board').addEventListener('click', function (e) {
+  const t = e.target;
+  const sqEl = t.closest ? t.closest('.square-55d63') : null;
+  if (!sqEl) return;
+  const sq = squareFromEl(sqEl);
   if (sq) onSquareTap(sq);
 });
 
