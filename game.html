@@ -194,8 +194,10 @@ socket.on('game_over', data => {
   $('resultCard').classList.remove('hidden');
   $('resultTitle').textContent = data.reason_text || 'Game over';
   let extra = '';
-  if (data.reason === 'abandon_forfeit') extra = 'Your opponent abandoned and forfeited.';
+    if (data.reason === 'abandon_forfeit') extra = 'Your opponent abandoned and forfeited.';
+  if (!data.payouts.length) extra = 'Free game — no XRP was at stake.';
   $('resultReason').textContent = extra;
+  document.querySelector('table.payouts').style.display = data.payouts.length ? '' : 'none';
   const tb = $('payoutRows'); tb.innerHTML = '';
   for (const p of data.payouts) {
     const tr = document.createElement('tr');
