@@ -65,6 +65,12 @@
     <div class="levels" id="levels"></div>
   </div>
 
+  <div class="card" id="computerCard">
+    <h2>Play the computer</h2>
+    <p class="muted">No sign-in needed. Free, no XRP, no opponent needed.</p>
+    <button onclick="location.href='/computer.html'">Play vs Computer</button>
+  </div>
+
   <div class="card hidden" id="joinCard">
     <h2>3 · Or join a friend's game</h2>
     <div class="row">
@@ -76,184 +82,8 @@
   <div class="card">
     <h2>How it works</h2>
     <ul class="rules">
-      <li>Both players stake the <b>same amount of XRP</b> to the game's escrow wallet.</li>
-      <li><b>Win</b> (checkmate, resignation, time): you get your stake back <b>plus 90% of the loser's stake</b>. The operator takes 10%.</li>
-      <li><b>Draw</b>: both refunded <b>95%</b>, operator takes 5% each.</li>
-      <li><b>Abandon the game</b> (disconnect): counts as a <b>forfeit loss</b> — you get <b>nothing</b>, your opponent wins as normal.</li>
-      <li>If <b>both</b> abandon: each refunded 97.5%, operator takes 2.5% each.</li>
-      <li>Stakes are held by the operator's escrow wallet — <b>you trust the operator</b>, this is not trustless.</li>
-    </ul>
-  </div>
-</div>
-
-<script>
-const $ = id => document.getElementById(id);
-let myAddress = sessionStorage.getItem('cx_address') || null;
-let levelsData = {};
-
-function showAuthed() {
-  $('authStart').classList.add('hidden');
-  $('qr').classList.add('hidden');
-  $('authed').classList.remove('hidden');
-  $('myAddr').textContent = myAddress;
-  $('lobbyCard').classList.remove('hidden');
-  $('joinCard').classList.remove('hidden');
-}
-
-async function init() {
-  const r = await fetch('/api/levels');
-  const data = await r.json();
-  levelsData = data.levels;
-  const box = $('levels');
-  box.innerHTML = '';
-  for (const [key, lv] of Object.entries(levelsData)) {
-    const d = document.createElement('div');
-    d.className = 'level';
-    d.innerHTML = `<h3>${lv.label}</h3>
-            <div class="stake">${lv.stake_xrp > 0 ? lv.stake_xrp + ' XRP' : 'FREE'}</div>
-      <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment${lv.stake_xrp > 0 ? '' : ' · no deposit, just play'}</div>
-      <button data-level="${key}">Create game</button>`;
-    box.appendChild(d);
-  }
-  box.querySelectorAll('button').forEach(b => b.onclick = () => createGame(b.dataset.level));
-  $('joinBtn').onclick = joinGame;
-  if (myAddress) showAuthed();
-  else $('signinBtn').onclick = signIn;
-  if (data.dev_mode) {
-    const dev = document.createElement('button');
-    dev.className = 'ghost'; dev.style.marginLeft = '10px';
-    dev.textContent = 'Dev sign-in (no Xaman)';
-    dev.onclick = () => {
-      myAddress = 'rDEV' + Math.random().toString(36).slice(2, 12).toUpperCase() + 'XAMANDEVTEST';
-      sessionStorage.setItem('cx_address', myAddress);
-      showAuthed();
-    };
-    $('authStart').appendChild(dev);
-  }
-}
-
-async function signIn() {
-  const r = await fetch('/api/auth/xaman', {method:'POST'});
-  const data = await r.json();
-  if (data.error) { alert(data.error); return; }
-  $('authStart').classList.add('hidden');
-  $('qr').classList.remove('hidden');
-  $('qrImg').src = data.qr;
-  $('qrLink').href = data.url;
-  const poll = setInterval(async () => {
-    const pr = await fetch('/api/auth/xaman/' + data.uuid);
-    const pd = await pr.json();
-    if (pd.signed && pd.account) {
-      clearInterval(poll);
-      myAddress = pd.account;
-      sessionStorage.setItem('cx_address', myAddress);
-      showAuthed();
-    } else if (pd.cancelled || pd.expired) {
-      clearInterval(poll);
-      $('qrStatus').textContent = 'Request cancelled or expired — try again.';
-    }
-  }, 2000);
-}
-
-async function createGame(level) {
-  const r = await fetch('/api/games/create', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({level})
-  });
-  const g = await r.json();
-  if (g.error) { alert(g.error); return; }
-  location.href = '/game.html?g=' + g.game_id;
-}
-
-function joinGame() {
-  const code = $('gameCode').value.trim();
-  if (!code) return;
-  location.href = '/game.html?g=' + encodeURIComponent(code);
-}
-
-init();
-</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chess xApp — Stake XRP. Winner takes it.</title>
-<style>
-  :root { --bg:#0f1420; --card:#1a2233; --accent:#f5b301; --text:#e8ecf4; --muted:#8b93a7; }
-  * { box-sizing:border-box; }
-  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,sans-serif; margin:0; padding:24px; }
-  .wrap { max-width:720px; margin:0 auto; }
-  header { text-align:center; margin-bottom:28px; }
-  header h1 { margin:0 0 6px; }
-  header h1 .xrp { color:var(--accent); }
-  header p { color:var(--muted); margin:0; }
-  .card { background:var(--card); border-radius:12px; padding:20px; margin-bottom:18px; }
-  .card h2 { margin:0 0 12px; font-size:1.1rem; }
-  button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:12px 18px; font-size:1rem; font-weight:700; cursor:pointer; }
-  button:disabled { opacity:.5; cursor:default; }
-  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
-  input { background:#0c111c; color:var(--text); border:1px solid #2c3650; border-radius:8px; padding:12px; font-size:1rem; width:100%; }
-  .levels { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; }
-  .level { background:#141b2c; border:1px solid #2c3650; border-radius:10px; padding:16px; text-align:center; }
-  .level h3 { margin:0 0 8px; color:var(--accent); }
-  .level .stake { font-size:1.6rem; font-weight:800; margin:4px 0; }
-  .level .meta { color:var(--muted); font-size:.85rem; margin-bottom:12px; }
-  .row { display:flex; gap:10px; }
-  .row input { flex:1; }
-  #qr { text-align:center; }
-  #qr img { max-width:220px; border-radius:8px; background:#fff; padding:8px; }
-  .muted { color:var(--muted); font-size:.9rem; }
-  .addr { font-family:monospace; font-size:.8rem; word-break:break-all; color:var(--accent); }
-  ul.rules { margin:8px 0; padding-left:20px; color:var(--muted); font-size:.9rem; }
-  ul.rules b { color:var(--text); }
-  .hidden { display:none; }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <header>
-    <h1>♞ Chess <span class="xrp">xApp</span></h1>
-    <p>Peer-to-peer chess for real XRP stakes. Winner takes 90% of the pot's edge.</p>
-  </header>
-
-  <div class="card" id="authCard">
-    <h2>1 · Sign in with Xaman</h2>
-    <div id="authStart">
-      <button id="signinBtn">Sign in with Xaman</button>
-      <p class="muted">You'll approve a SignIn request in your Xaman wallet. No funds move at sign-in.</p>
-    </div>
-    <div id="qr" class="hidden">
-      <p>Scan with Xaman:</p>
-      <img id="qrImg" alt="Xaman sign-in QR">
-      <p><a id="qrLink" href="#" style="color:var(--accent)">Open in Xaman</a></p>
-      <p class="muted" id="qrStatus">Waiting for approval…</p>
-    </div>
-    <div id="authed" class="hidden">
-      <p>Signed in as</p>
-      <p class="addr" id="myAddr"></p>
-    </div>
-  </div>
-
-  <div class="card hidden" id="lobbyCard">
-    <h2>2 · Pick your level</h2>
-    <div class="levels" id="levels"></div>
-  </div>
-
-  <div class="card hidden" id="joinCard">
-    <h2>3 · Or join a friend's game</h2>
-    <div class="row">
-      <input id="gameCode" placeholder="Game code (e.g. a1b2c3d4)">
-      <button id="joinBtn">Join</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>How it works</h2>
-        <ul class="rules">
       <li><b>Practice</b> games are free — no deposit, no payouts, just chess.</li>
+      <li><b>vs Computer</b> is free and needs no sign-in — just you against the engine.</li>
       <li>Both players stake the <b>same amount of XRP</b> to the game's escrow wallet.</li>
       <li><b>Win</b> (checkmate, resignation, time): you get your stake back <b>plus 90% of the loser's stake</b>. The operator takes 10%.</li>
       <li><b>Draw</b>: both refunded <b>95%</b>, operator takes 5% each.</li>
@@ -288,8 +118,8 @@ async function init() {
     const d = document.createElement('div');
     d.className = 'level';
     d.innerHTML = `<h3>${lv.label}</h3>
-      <div class="stake">${lv.stake_xrp} XRP</div>
-      <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment</div>
+      <div class="stake">${lv.stake_xrp > 0 ? lv.stake_xrp + ' XRP' : 'FREE'}</div>
+      <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment${lv.stake_xrp > 0 ? '' : ' · no deposit, just play'}</div>
       <button data-level="${key}">Create game</button>`;
     box.appendChild(d);
   }

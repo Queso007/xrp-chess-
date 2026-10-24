@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chess xApp — Play vs Computer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+<style>
+  :root { --bg:#0f1420; --card:#1a2233; --accent:#f5b301; --text:#e8ecf4; --muted:#8b93a7; }
+  * { box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,sans-serif; margin:0; padding:24px; }
+  .wrap { max-width:520px; margin:0 auto; }
+  header { text-align:center; margin-bottom:20px; }
+  header h1 { margin:0 0 6px; }
+  header h1 .xrp { color:var(--accent); }
+  header p { color:var(--muted); margin:0; }
+  .card { background:var(--card); border-radius:12px; padding:20px; margin-bottom:18px; }
+  .card h2 { margin:0 0 12px; font-size:1.1rem; }
+  button { background:var(--accent); color:#111; border:0; border-radius:8px; padding:12px 18px; font-size:1rem; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  select { background:#0c111c; color:var(--text); border:1px solid #2c3650; border-radius:8px; padding:12px; font-size:1rem; width:100%; }
+  .controls { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
+  .controls label { color:var(--muted); font-size:.85rem; display:block; margin-bottom:4px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .row button { flex:1; }
+  #board { width:100%; max-width:480px; margin:0 auto 12px; }
+  #status { text-align:center; font-weight:700; min-height:1.4em; }
+  #status.thinking { color:var(--accent); }
+  #moves { color:var(--muted); font-size:.9rem; line-height:1.6; word-break:break-word; min-height:1.6em; }
+  .muted { color:var(--muted); font-size:.9rem; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>♞ vs <span class="xrp">Computer</span></h1>
+    <p>Free, no sign-in, no XRP. Just you against the engine.</p>
+  </header>
+
+  <div class="card">
+    <div class="controls">
+      <div>
+        <label for="difficulty">Difficulty</label>
+        <select id="difficulty">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+      <div>
+        <label for="color">Play as</label>
+        <select id="color">
+          <option value="white" selected>White</option>
+          <option value="black">Black</option>
+          <option value="random">Random</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <button id="newBtn">New game</button>
+      <button id="flipBtn" class="ghost">Flip board</button>
+      <button id="resignBtn" class="ghost">Resign</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="board"></div>
+    <div id="status">Loading engine…</div>
+    <div id="moves"></div>
+    <p class="muted">Promotion auto-queens. <a href="/">← Back to lobby</a></p>
+  </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const DIFFS = {
+  easy:   { skill: 2,  depth: 6 },
+  medium: { skill: 10, depth: 10 },
+  hard:   { skill: 20, depth: 14 }
+};
+
+let game = new Chess();
+let board = null;
+let engine = null;
+let engineReady = false;
+let engineThinking = false;
+let playerColor = 'white'; // 'white' | 'black'
+let gameActive = false;
+
+function setStatus(text, thinking) {
+  const s = $('status');
+  s.textContent = text;
+  s.classList.toggle('thinking', !!thinking);
+}
+
+function renderMoves() {
+  const h = game.history();
+  let out = '';
+  for (let i = 0; i < h.length; i += 2) {
+    out += (i / 2 + 1) + '. ' + h[i] + (h[i + 1] ? ' ' + h[i + 1] : '') + '  ';
+  }
+  $('moves').textContent = out;
+}
+
+function updateStatus() {
+  if (!gameActive) return;
+  if (game.game_over()) {
+    gameActive = false;
+    if (game.in_checkmate()) {
+      const winnerWhite = game.turn() === 'b';
+      const youWon = (winnerWhite && playerColor === 'white') || (!winnerWhite && playerColor === 'black');
+      setStatus(youWon ? 'Checkmate — you win!' : 'Checkmate — computer wins.');
+    } else if (game.in_stalemate()) {
+      setStatus('Stalemate — draw.');
+    } else if (game.insufficient_material()) {
+      setStatus('Draw — insufficient material.');
+    } else if (game.in_threefold_repetition()) {
+      setStatus('Draw — threefold repetition.');
+    } else {
+      setStatus('Draw.');
+    }
+    return;
+  }
+  const turn = game.turn();
+  const yourTurn = (turn === 'w' && playerColor === 'white') || (turn === 'b' && playerColor === 'black');
+  let text = yourTurn ? 'Your move' : 'Computer thinking…';
+  if (game.in_check()) text += ' — check!';
+  setStatus(text, !yourTurn);
+}
+
+function engineMove() {
+  if (!gameActive || !engineReady || engineThinking) return;
+  const turn = game.turn();
+  const yourTurn = (turn === 'w' && playerColor === 'white') || (turn === 'b' && playerColor === 'black');
+  if (yourTurn || game.game_over()) return;
+  const diff = DIFFS[$('difficulty').value];
+  engineThinking = true;
+  engine.postMessage('setoption name Skill Level value ' + diff.skill);
+  engine.postMessage('position fen ' + game.fen());
+  engine.postMessage('go depth ' + diff.depth);
+}
+
+function onEngineMessage(e) {
+  const msg = typeof e.data === 'string' ? e.data : '';
+  if (msg === 'uciok') { engineReady = true; updateStatus(); engineMove(); return; }
+  if (msg.indexOf('bestmove') === 0) {
+    engineThinking = false;
+    const parts = msg.split(' ');
+    const mv = parts[1];
+    if (!mv || mv === '(none)') { updateStatus(); return; }
+    const move = game.move({ from: mv.slice(0, 2), to: mv.slice(2, 4), promotion: 'q' });
+    if (move) board.position(game.fen());
+    renderMoves();
+    updateStatus();
+  }
+}
+
+function startEngine() {
+  try {
+    engine = new Worker('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.0/stockfish.js');
+  } catch (err) {
+    setStatus('Engine could not start in this browser — try Brave or Chrome.');
+    return;
+  }
+  engine.onmessage = onEngineMessage;
+  engine.onerror = function () {
+    setStatus('Engine could not start in this browser — try Brave or Chrome.');
+  };
+  engine.postMessage('uci');
+}
+
+function newGame() {
+  const choice = $('color').value;
+  playerColor = choice === 'random' ? (Math.random() < 0.5 ? 'white' : 'black') : choice;
+  game.reset();
+  board.orientation(playerColor);
+  board.start();
+  gameActive = true;
+  engineThinking = false;
+  renderMoves();
+  if (engineReady) { updateStatus(); engineMove(); }
+  else setStatus('Loading engine…');
+}
+
+function onDragStart(source, piece) {
+  if (!gameActive || !engineReady || engineThinking || game.game_over()) return false;
+  const turn = game.turn();
+  if ((turn === 'w' && piece.search(/^b/) !== -1) || (turn === 'b' && piece.search(/^w/) !== -1)) return false;
+  const yourTurn = (turn === 'w' && playerColor === 'white') || (turn === 'b' && playerColor === 'black');
+  if (!yourTurn) return false;
+}
+
+function onDrop(source, target) {
+  const move = game.move({ from: source, to: target, promotion: 'q' });
+  if (move === null) return 'snapback';
+  renderMoves();
+  updateStatus();
+  window.setTimeout(engineMove, 150);
+}
+
+function onSnapEnd() {
+  board.position(game.fen());
+}
+
+board = Chessboard('board', {
+  draggable: true,
+  position: 'start',
+  pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png',
+  onDragStart: onDragStart,
+  onDrop: onDrop,
+  onSnapEnd: onSnapEnd
+});
+
+$('newBtn').onclick = newGame;
+$('flipBtn').onclick = function () { board.flip(); };
+$('resignBtn').onclick = function () {
+  if (!gameActive || game.game_over()) return;
+  gameActive = false;
+  engineThinking = false;
+  setStatus('You resigned — computer wins.');
+};
+$('difficulty').onchange = newGame;
+$('color').onchange = newGame;
+
+startEngine();
+newGame();
+</script>
+</body>
+</html>
