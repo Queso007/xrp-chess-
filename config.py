@@ -26,7 +26,10 @@ def _require_env(name: str) -> str:
 DEV_MODE = os.environ.get("DEV_MODE", "false").strip().lower() in ("1", "true", "yes")
 
 # ------------------------------------------------------------- XRPL net
-XRPL_NETWORK = os.environ.get("XRPL_NETWORK", "testnet").lower()
+# Production is mainnet: the escrow wallet and all stakes live there, so
+# the watcher must look at mainnet unless XRPL_NETWORK says otherwise.
+# (A testnet default here once made the watcher blind to real payments.)
+XRPL_NETWORK = os.environ.get("XRPL_NETWORK", "mainnet").lower()
 _DEFAULT_RPC = {
     "mainnet": "https://s1.ripple.com:51234/",
     "testnet": "https://s.altnet.rippletest.net:51234/",
