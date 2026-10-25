@@ -53,6 +53,48 @@ def create_signin_payload(api_key: str, api_secret: str) -> dict:
     }
 
 
+def create_payment_payload(api_key: str, api_secret: str, destination: str,
+                           amount_drops: int, dest_tag: int, game_id: str) -> dict:
+    """Create a pre-filled Payment sign request. Returns {uuid, url}.
+
+    The payload carries the exact stake and destination tag, so the player
+    only approves — no manual address/tag entry. submit=True so Xaman
+    submits the payment to the ledger after signing. return_url sends the
+    player back to the xApp (fresh launch, then Resume) or the game page.
+    """
+    resp = requests.post(
+        f"{XAMAN_API}/platform/payload",
+        headers=_headers(api_key, api_secret),
+        json={
+            "txjson": {
+                "TransactionType": "Payment",
+                "Destination": destination,
+                "Amount": str(amount_drops),
+                "DestinationTag": dest_tag,
+            },
+            "options": {
+                "submit": True,
+                "return_url": {
+                    "app": "https://xumm.app/detect/xapp:sandbox.b99a93fc4ef4",
+                    "web": f"https://xrp-chess-c5b1.onrender.com/game.html?g={game_id}",
+                },
+            },
+            "custom_meta": {
+                "identifier": f"cx-pay-{game_id}",
+                "instruction": "Approve to pay your chess game stake.",
+            },
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    nxt = data.get("next", {}) or {}
+    return {
+        "uuid": data["uuid"],
+        "url": nxt.get("always"),
+    }
+
+
 def poll_payload(api_key: str, api_secret: str, uuid: str) -> dict:
     """Poll a payload. Returns {signed, account?, cancelled?, expired?}."""
     resp = requests.get(
