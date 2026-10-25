@@ -116,6 +116,9 @@ async function tryXappSignIn() {
   // regular QR flow below is used instead.
   const ott = new URLSearchParams(location.search).get('xAppToken');
   if (!ott || myAddress) return 'absent';
+  const s0 = $('xappStatus');
+  s0.textContent = 'Signing you in via Xaman…';
+  s0.classList.remove('hidden');
   try {
     const r = await fetch('/api/auth/ott', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
