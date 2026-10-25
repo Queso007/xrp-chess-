@@ -237,6 +237,30 @@ function renderResume() {
     b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(g.id); };
     $('resumeList').appendChild(b);
   });
+  pruneResumeList();
+}
+
+// Drop resume entries for games that are gone (wiped) or over, so the
+// list only ever offers live games. A network failure keeps entries —
+// never delete on a maybe. Re-renders only if something was dropped.
+async function pruneResumeList() {
+  const list = savedGames();
+  if (!list.length) return;
+  let changed = false;
+  const kept = [];
+  for (const g of list) {
+    try {
+      const r = await fetch('/api/games/' + encodeURIComponent(g.id));
+      if (!r.ok) { changed = true; continue; }
+      const s = await r.json();
+      if (s.state === 'ended') { changed = true; continue; }
+      kept.push(g);
+    } catch (err) { kept.push(g); }
+  }
+  if (changed) {
+    try { localStorage.setItem('cx_games', JSON.stringify(kept)); } catch (err) {}
+    renderResume();
+  }
 }
 
 async function createGame(level) {

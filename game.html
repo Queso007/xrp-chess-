@@ -171,6 +171,14 @@ function initBoard() {
 function render(s) {
   state = s; lastSync = Date.now();
   clearSelection();
+  // Ended games can't be resumed: drop them from the lobby resume list
+  // so dead games stop being offered.
+  if (s.state === 'ended') {
+    try {
+      const list = JSON.parse(localStorage.getItem('cx_games') || '[]');
+      localStorage.setItem('cx_games', JSON.stringify(list.filter(g => g.id !== gameId)));
+    } catch (err) { /* ignore */ }
+  }
   $('stakeLabel').textContent = s.practice ? 'No stake' : s.stake_xrp + ' XRP';
   $('levelLabel').textContent = s.level_label;
   board.position(s.fen, false);
