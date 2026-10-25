@@ -47,6 +47,7 @@
     <div id="authStart">
       <button id="signinBtn">Sign in with Xaman</button>
       <p class="muted">You'll approve a SignIn request in your Xaman wallet. No funds move at sign-in.</p>
+      <p class="muted hidden" id="xappStatus"></p>
     </div>
     <div id="qr" class="hidden">
       <p>Scan with Xaman:</p>
@@ -108,7 +109,41 @@ function showAuthed() {
   $('joinCard').classList.remove('hidden');
 }
 
+async function tryXappSignIn() {
+  // Inside Xaman, the xApp opens with a one-time token (?xAppToken=...) that
+  // the backend resolves to the user's account — no QR scan needed. In a
+  // normal browser there is no token, so this silently does nothing and the
+  // regular QR flow below is used instead.
+  const ott = new URLSearchParams(location.search).get('xAppToken');
+  if (!ott || myAddress) return 'absent';
+  try {
+    const r = await fetch('/api/auth/ott', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ott})
+    });
+    const data = await r.json();
+    if (data.account) {
+      myAddress = data.account;
+      sessionStorage.setItem('cx_address', myAddress);
+      try {
+        const url = new URL(location.href);
+        url.searchParams.delete('xAppToken');
+        history.replaceState(null, '', url.toString());
+      } catch (err) { /* token stays in URL; sign-in still counts */ }
+      showAuthed();
+      return 'ok';
+    }
+  } catch (err) { /* fall through to the QR flow */ }
+  return 'failed';
+}
+
 async function init() {
+  const xapp = await tryXappSignIn();
+  if (xapp === 'failed') {
+    const s = $('xappStatus');
+    s.textContent = 'Automatic Xaman sign-in did not work — reopen the xApp from inside Xaman, or sign in with the QR code in a browser.';
+    s.classList.remove('hidden');
+  }
   const r = await fetch('/api/levels');
   const data = await r.json();
   levelsData = data.levels;
