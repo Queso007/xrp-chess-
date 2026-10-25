@@ -59,7 +59,9 @@
       <li>Send exactly <b class="stake" id="depAmount"></b> to the escrow wallet:</li>
     </ul>
     <p class="mono" id="depEscrow"></p>
-    <p>Destination tag: <b class="mono" id="depTag"></b> <span class="muted">(required — this links your payment to this game)</span></p>
+    <p><button class="ghost" id="copyEscrow">Copy escrow address</button></p>
+    <p>Destination tag: <b class="mono" id="depTag"></b> <button class="ghost" id="copyTag">Copy tag</button> <span class="muted">(required — this links your payment to this game)</span></p>
+    <p>Game ID: <span class="mono" id="gameIdText"></span> <button class="ghost" id="copyLink">Copy game link</button></p>
     <p class="muted" id="depProgress">Waiting for both deposits…</p>
   </div>
 
@@ -185,6 +187,7 @@ function render(s) {
     $('depAmount').textContent = s.stake_xrp + ' XRP';
     $('depEscrow').textContent = s.escrow_address || '(dev mode — no real escrow)';
     $('depTag').textContent = s.dest_tag;
+    $('gameIdText').textContent = gameId;
     const got = s.players.filter(p => p.deposited).length;
     $('depProgress').innerHTML = got === 2
       ? '<span class="ok">Both stakes confirmed — starting!</span>'
@@ -261,6 +264,29 @@ socket.on('game_over', data => {
 });
 
 $('resignBtn').onclick = () => { if (confirm(state && state.practice ? 'Resign this practice game?' : 'Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
+
+async function copyText(text, btn) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    const old = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  } catch (err) {
+    btn.textContent = 'Copy failed — long-press the text';
+  }
+}
+$('copyEscrow').onclick = e => copyText($('depEscrow').textContent, e.target);
+$('copyTag').onclick = e => copyText($('depTag').textContent, e.target);
+$('copyLink').onclick = e => copyText(location.href, e.target);
 $('drawBtn').onclick = () => socket.emit('offer_draw', {game_id: gameId, address: myAddress});
 $('acceptDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: true});
 $('declineDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: false});
