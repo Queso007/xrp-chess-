@@ -266,23 +266,31 @@ socket.on('game_over', data => {
 $('resignBtn').onclick = () => { if (confirm(state && state.practice ? 'Resign this practice game?' : 'Resign this game? Your stake is forfeit.')) socket.emit('resign', {game_id: gameId, address: myAddress}); };
 
 async function copyText(text, btn) {
+  const label = btn.dataset.label || btn.textContent;
+  btn.dataset.label = label;
+  let ok = false;
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);
-    } else {
+      ok = true;
+    }
+  } catch (err) { /* Xaman's webview has the API but rejects it — fall through */ }
+  if (!ok) {
+    try {
       const ta = document.createElement('textarea');
       ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
       document.body.appendChild(ta);
+      ta.focus();
       ta.select();
-      document.execCommand('copy');
+      ta.setSelectionRange(0, ta.value.length);
+      ok = document.execCommand('copy');
       ta.remove();
-    }
-    const old = btn.textContent;
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = old; }, 1500);
-  } catch (err) {
-    btn.textContent = 'Copy failed — long-press the text';
+    } catch (err) { ok = false; }
   }
+  btn.textContent = ok ? 'Copied!' : 'Copy failed — long-press the text';
+  setTimeout(() => { btn.textContent = label; }, 2000);
 }
 $('copyEscrow').onclick = e => copyText($('depEscrow').textContent, e.target);
 $('copyTag').onclick = e => copyText($('depTag').textContent, e.target);
