@@ -24,7 +24,7 @@ import config
 import escrow as escrow_mod
 import xaman as xaman_mod
 from config import validate_startup
-from game import ENDED, Game
+from game import ENDED, WAITING, Game
 
 validate_startup()
 
@@ -208,6 +208,61 @@ def create_game():
     with _games_lock:
         _games[game.game_id] = game
     return jsonify(game.to_dict())
+
+
+@app.post("/api/games/find-or-create")
+def find_or_create():
+    """Quick Play matchmaking: join a waiting game at this level, or create one.
+
+    Order: (1) return the caller's own waiting game at this level, so a
+    returning player never duplicates their lobby; (2) join the oldest
+    waiting game from another player at this level; (3) create a fresh game.
+    Ended and depositing games are never matched. The waiting player learns
+    about the join instantly via the room broadcast; the deposit watcher
+    starts as usual when the joiner opens the game page.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    level = data.get("level")
+    address = data.get("address")
+    if level not in config.LEVELS:
+        return jsonify({"error": f"unknown level: {level}"}), 400
+    if not address:
+        return jsonify({"error": "address is required"}), 400
+    with _games_lock:
+        for game in _games.values():
+            if (game.level_key == level and game.state == WAITING
+                    and address in game.players):
+                state = game.to_dict()
+                state["created"] = False
+                state["matched"] = "resumed"
+                return jsonify(state)
+        waiting = [g for g in _games.values()
+                   if g.level_key == level and g.state == WAITING
+                   and len(g.players) == 1
+                   and address not in g.players]
+        if waiting:
+            game = min(waiting, key=lambda g: g.created_at)
+            res = game.join(address)
+            if res.get("ok"):
+                state = game.to_dict()
+                state["created"] = False
+                state["matched"] = "joined"
+                socketio.emit("game_state", state, room=game.game_id)
+                return jsonify(state)
+            # Join raced away (shouldn't happen under the lock) — fall through.
+        game = Game(
+            level_key=level,
+            level_cfg=config.LEVELS[level],
+            operator_address=config.OPERATOR_ADDRESS,
+            escrow_address=config.ESCROW_ADDRESS,
+            abandon_timeout=config.ABANDON_TIMEOUT_SEC,
+            deposit_timeout=config.DEPOSIT_TIMEOUT_SEC,
+        )
+        _games[game.game_id] = game
+    state = game.to_dict()
+    state["created"] = True
+    state["matched"] = "created"
+    return jsonify(state)
 
 
 @app.get("/api/games/<game_id>")

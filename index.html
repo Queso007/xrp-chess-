@@ -169,10 +169,12 @@ async function init() {
     d.innerHTML = `<h3>${lv.label}</h3>
       <div class="stake">${lv.stake_xrp > 0 ? lv.stake_xrp + ' XRP' : 'FREE'}</div>
       <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment${lv.stake_xrp > 0 ? '' : ' · no deposit, just play'}</div>
-      <button data-level="${key}">Create game</button>`;
+      <button data-level="${key}">Create game</button>
+      <button class="ghost" data-find="${key}">Find opponent</button>`;
     box.appendChild(d);
   }
-  box.querySelectorAll('button').forEach(b => b.onclick = () => createGame(b.dataset.level));
+  box.querySelectorAll('button[data-level]').forEach(b => b.onclick = () => createGame(b.dataset.level));
+  box.querySelectorAll('button[data-find]').forEach(b => b.onclick = () => findGame(b.dataset.find));
   $('joinBtn').onclick = joinGame;
   if (myAddress) showAuthed();
   else $('signinBtn').onclick = signIn;
@@ -241,6 +243,18 @@ async function createGame(level) {
   const r = await fetch('/api/games/create', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({level})
+  });
+  const g = await r.json();
+  if (g.error) { alert(g.error); return; }
+  saveGame(g.game_id, level);
+  location.href = '/game.html?g=' + g.game_id;
+}
+
+async function findGame(level) {
+  if (!myAddress) { alert('Sign in first — Quick Play needs your wallet address.'); return; }
+  const r = await fetch('/api/games/find-or-create', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({level, address: myAddress})
   });
   const g = await r.json();
   if (g.error) { alert(g.error); return; }
