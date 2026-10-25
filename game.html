@@ -238,7 +238,17 @@ socket.on('connect', () => {
 });
 socket.on('game_state', render);
 socket.on('move_result', r => { if (!r.ok && !r.ended) $('status').textContent = 'Move rejected: ' + r.error; });
-socket.on('error', e => { $('status').textContent = 'Error: ' + (e.message || e); });
+socket.on('error', e => {
+  const msg = e.message || e;
+  $('status').textContent = 'Error: ' + msg;
+  // Dead game: drop it from the lobby resume list so it isn't offered again.
+  if (typeof msg === 'string' && msg.includes('unknown game')) {
+    try {
+      const list = JSON.parse(localStorage.getItem('cx_games') || '[]');
+      localStorage.setItem('cx_games', JSON.stringify(list.filter(g => g.id !== gameId)));
+    } catch (err) { /* ignore */ }
+  }
+});
 socket.on('deposit_timeout', () => { $('status').textContent = 'Deposit window expired — game cancelled, stakes refunded.'; });
 socket.on('settlement_error', e => { $('status').textContent = 'Payout error: ' + e.error + ' — contact the operator.'; });
 socket.on('game_over', data => {

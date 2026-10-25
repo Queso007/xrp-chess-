@@ -80,6 +80,12 @@
     </div>
   </div>
 
+  <div class="card hidden" id="resumeCard">
+    <h2>Your games — tap to resume</h2>
+    <p class="muted">If you leave to pay, come back here and tap your game instead of creating a new one — a new game gets a new destination tag, and a payment made for the old tag can't match it.</p>
+    <div id="resumeList"></div>
+  </div>
+
   <div class="card">
     <h2>How it works</h2>
     <ul class="rules">
@@ -106,6 +112,7 @@ function showAuthed() {
   $('qr').classList.add('hidden');
   $('authed').classList.remove('hidden');
   $('myAddr').textContent = myAddress;
+  renderResume();
   $('lobbyCard').classList.remove('hidden');
   $('joinCard').classList.remove('hidden');
 }
@@ -205,6 +212,31 @@ async function signIn() {
   }, 2000);
 }
 
+function savedGames() {
+  try { return JSON.parse(localStorage.getItem('cx_games') || '[]'); }
+  catch (err) { return []; }
+}
+function saveGame(id, level) {
+  try {
+    const list = savedGames().filter(g => g.id !== id);
+    list.unshift({id, level: level || '', at: Date.now()});
+    localStorage.setItem('cx_games', JSON.stringify(list.slice(0, 5)));
+  } catch (err) { /* storage unavailable — resume list just won't show */ }
+}
+function renderResume() {
+  const list = savedGames();
+  const card = $('resumeCard');
+  if (!list.length) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  $('resumeList').innerHTML = '';
+  list.forEach(g => {
+    const b = document.createElement('button');
+    b.textContent = (g.level ? g.level + ' · ' : '') + g.id;
+    b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(g.id); };
+    $('resumeList').appendChild(b);
+  });
+}
+
 async function createGame(level) {
   const r = await fetch('/api/games/create', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -212,12 +244,19 @@ async function createGame(level) {
   });
   const g = await r.json();
   if (g.error) { alert(g.error); return; }
+  saveGame(g.game_id, level);
   location.href = '/game.html?g=' + g.game_id;
 }
 
 function joinGame() {
-  const code = $('gameCode').value.trim();
+  let code = $('gameCode').value.trim();
   if (!code) return;
+  // Accept a pasted full game link as well as a bare code.
+  const m = code.match(/[?&]g=([^&#]+)/);
+  if (m) code = decodeURIComponent(m[1]);
+  code = code.trim();
+  if (!code) return;
+  saveGame(code, '');
   location.href = '/game.html?g=' + encodeURIComponent(code);
 }
 
