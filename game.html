@@ -334,6 +334,9 @@ $('payBtn').onclick = async () => {
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
     if (data.dev_mode) { $('status').textContent = 'Dev mode — no real payment needed.'; $('payBtn').disabled = false; return; }
     if (!data.url) throw new Error('No sign URL returned');
+    // Straight-to-game: remember this game so the lobby can send the
+    // player straight back here after signing, instead of needing resume.
+    try { sessionStorage.setItem('cx_return_to_game', gameId); } catch (err) { /* ignore */ }
     location.href = data.url;
   } catch (err) {
     $('status').textContent = 'Could not build payment: ' + err.message + ' — you can still pay manually with the address and tag above.';
@@ -345,6 +348,27 @@ $('acceptDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, ad
 $('declineDraw').onclick = () => socket.emit('respond_draw', {game_id: gameId, address: myAddress, accept: false});
 
 initBoard();
+
+// Straight-to-game: while the game hasn't started, re-check the server
+// every few seconds AND the moment this page becomes visible again (e.g.
+// coming back from Xaman), so the board appears by itself once both
+// deposits land — no trip back to the lobby, no resume tap.
+function shouldPoll(s) {
+  return !!s && (s.state === 'waiting' || s.state === 'depositing');
+}
+async function fetchState() {
+  try {
+    const res = await fetch('/api/games/' + encodeURIComponent(gameId));
+    if (!res.ok) return;
+    const s = await res.json();
+    if (s && s.state) render(s);
+  } catch (err) { /* next poll / socket event will catch it */ }
+}
+setInterval(() => { if (shouldPoll(state)) fetchState(); }, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && shouldPoll(state)) fetchState();
+});
+fetchState();
 </script>
 </body>
 </html>
