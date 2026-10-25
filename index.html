@@ -95,6 +95,7 @@
   </div>
 </div>
 
+<script src="https://xumm.app/assets/cdn/xumm.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let myAddress = sessionStorage.getItem('cx_address') || null;
@@ -110,32 +111,35 @@ function showAuthed() {
 }
 
 async function tryXappSignIn() {
-  // Inside Xaman, the xApp opens with a one-time token (?xAppToken=...) that
-  // the backend resolves to the user's account — no QR scan needed. In a
-  // normal browser there is no token, so this silently does nothing and the
-  // regular QR flow below is used instead.
+  // Inside Xaman, the xApp opens with a one-time token (?xAppToken=...).
+  // Per Xaman's docs, the official SDK turns that token into the user's
+  // account — there is no backend endpoint for it (the earlier /api/auth/ott
+  // call 404'd on Xaman's side, which is why the last attempt failed).
+  // In a normal browser there is no token, so this silently does nothing
+  // and the regular QR flow below is used instead.
   const ott = new URLSearchParams(location.search).get('xAppToken');
   if (!ott || myAddress) return 'absent';
   const s0 = $('xappStatus');
   s0.textContent = 'Signing you in via Xaman…';
   s0.classList.remove('hidden');
   try {
-    const r = await fetch('/api/auth/ott', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ott})
-    });
-    const data = await r.json();
-    if (data.account) {
-      myAddress = data.account;
-      sessionStorage.setItem('cx_address', myAddress);
-      try {
-        const url = new URL(location.href);
-        url.searchParams.delete('xAppToken');
-        history.replaceState(null, '', url.toString());
-      } catch (err) { /* token stays in URL; sign-in still counts */ }
-      showAuthed();
-      return 'ok';
-    }
+    const Sdk = window.Xaman || window.Xumm;
+    if (!Sdk) throw new Error('sdk missing');
+    const xaman = new Sdk('6bf02d0f-9658-49b2-912d-8233c18314d8', ott);
+    const account = await Promise.race([
+      xaman.user.account,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+    ]);
+    if (!account) throw new Error('no account');
+    myAddress = account;
+    sessionStorage.setItem('cx_address', myAddress);
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete('xAppToken');
+      history.replaceState(null, '', url.toString());
+    } catch (err) { /* token stays in URL; sign-in still counts */ }
+    showAuthed();
+    return 'ok';
   } catch (err) { /* fall through to the QR flow */ }
   return 'failed';
 }
