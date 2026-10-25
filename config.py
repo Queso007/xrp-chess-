@@ -31,7 +31,10 @@ DEV_MODE = os.environ.get("DEV_MODE", "false").strip().lower() in ("1", "true", 
 # (A testnet default here once made the watcher blind to real payments.)
 XRPL_NETWORK = os.environ.get("XRPL_NETWORK", "mainnet").lower()
 _DEFAULT_RPC = {
-    "mainnet": "https://s1.ripple.com:51234/",
+    # s1.ripple.com stopped answering (connection failure), which made the
+    # deposit watcher poll nothing forever — silent empty polls, 0/2 forever.
+    # xrplcluster.com is the current public mainnet endpoint.
+    "mainnet": "https://xrplcluster.com/",
     "testnet": "https://s.altnet.rippletest.net:51234/",
 }
 XRPL_JSON_RPC = os.environ.get(
