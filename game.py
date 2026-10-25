@@ -82,6 +82,7 @@ class Game:
         operator_address: str,
         escrow_address: str = "",
         abandon_timeout: int = 90,
+        preplay_abandon_timeout: int = 1800,
         deposit_timeout: int = 600,
         game_id: str | None = None,
         dest_tag: int | None = None,
@@ -98,6 +99,7 @@ class Game:
         self.operator_address = operator_address
         self.escrow_address = escrow_address
         self.abandon_timeout = abandon_timeout
+        self.preplay_abandon_timeout = preplay_abandon_timeout
         self.deposit_timeout = deposit_timeout
         # Unique 32-bit destination tag so deposits for this game can be
         # matched on-ledger without ambiguity.
@@ -364,7 +366,11 @@ class Game:
         elif self.state in (WAITING, DEPOSITING):
             # Someone walked away before stakes were locked: no contest,
             # refund whatever was deposited.
-            if any(now - p["last_heartbeat"] > self.abandon_timeout
+            # Pre-play uses a much longer silence window than mid-game:
+            # paying and switching wallets takes minutes, and the 90s
+            # mid-game timer would cancel games while players pay.
+            # (DEPOSITING games still end at the 600s deposit deadline.)
+            if any(now - p["last_heartbeat"] > self.preplay_abandon_timeout
                    for p in self.players.values()):
                 self._finish(END_CANCELLED)
                 events.append({"type": "end", "reason": END_CANCELLED})
