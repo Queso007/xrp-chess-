@@ -63,6 +63,9 @@ def _settle_and_broadcast(game_id: str) -> None:
             xrpl_client, config.ESCROW_SEED, payouts, dev_mode=config.DEV_MODE
         )
     except Exception as exc:  # settlement must never silently vanish
+        # Allow a later poll to retry: construction errors (e.g. bad memo
+        # shape) fail before any payment is submitted, so a retry is safe.
+        game.payouts_sent = False
         socketio.emit(
             "settlement_error",
             {"game_id": game_id, "error": str(exc)},

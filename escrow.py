@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 from xrpl.clients import JsonRpcClient
 from xrpl.models.requests import AccountTx
-from xrpl.models.transactions import Payment
+from xrpl.models.transactions import Memo, Payment
 from xrpl.transaction import submit_and_wait
 from xrpl.wallet import Wallet
 
@@ -200,16 +200,22 @@ def send_payouts(
         return result
 
     wallet = Wallet.from_seed(seed)
+    # Build ALL payments first. xrpl-py requires memos as Memo objects,
+    # not raw dicts (Render's newer xrpl-py rejects dict memos outright).
+    # Building first also means a construction error surfaces before any
+    # money moves, so a retry can never double-pay.
+    payments: list[tuple[str, Payment]] = []
     for address, drops, memo in payouts:
         if drops <= 0:
             continue
         memo_hex = memo.encode("utf-8").hex().upper()
-        payment = Payment(
+        payments.append((address, Payment(
             account=wallet.address,
             destination=address,
             amount=str(drops),  # drops, as a decimal string
-            memos=[{"Memo": {"MemoData": memo_hex}}],
-        )
+            memos=[Memo(memo_data=memo_hex)],
+        )))
+    for address, payment in payments:
         # autofill handles fee/sequence/last-ledger; waits for validation.
         resp = submit_and_wait(payment, client, wallet)
         result[address] = resp.result["hash"]
