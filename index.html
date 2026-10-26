@@ -270,10 +270,11 @@ function renderResume() {
   });
 }
 
-// Drop resume entries for games that are gone (wiped) or over, so the
-// list only ever offers live games. A network failure keeps entries —
-// never delete on a maybe. Returns the most recent game confirmed live
-// (waiting, depositing, or playing), or null. Re-renders only if
+// Drop resume entries for games that are gone (wiped) or over, or that
+// belong to a different wallet, so the list only ever offers YOUR live
+// games. A network failure keeps entries — never delete on a maybe.
+// Returns the most recent game confirmed live (waiting, depositing, or
+// playing) for the signed-in player, or null. Re-renders only if
 // something was dropped.
 async function pruneResumeList() {
   const list = savedGames();
@@ -287,8 +288,18 @@ async function pruneResumeList() {
       if (!r.ok) { changed = true; continue; }
       const s = await r.json();
       if (s.state === 'ended') { changed = true; continue; }
+      // Resume is only for YOUR open game: drop saved games where the
+      // signed-in wallet is not a player (e.g. the other wallet's game
+      // on a shared device). Fail open if the player list is missing.
+      const players = s.players || null;
+      if (myAddress && players && !players.some(p => p.address === myAddress)) {
+        changed = true; continue;
+      }
       kept.push(g);
-      if (!live && (s.state === 'waiting' || s.state === 'depositing' || s.state === 'playing')) live = g;
+      if (!live && (s.state === 'waiting' || s.state === 'depositing' || s.state === 'playing')) {
+        // Prefer the server's level (covers join-via-link saves with no level).
+        live = {...g, level: s.level || g.level || ''};
+      }
     } catch (err) { kept.push(g); }
   }
   if (changed) {
@@ -313,13 +324,16 @@ function restoreCreateButtons() {
   if (instead) instead.remove();
 }
 
-// If the player already has a live game, the lobby's Create buttons
-// become Resume buttons pointing at it — tapping Create by accident
-// while a game is alive is how duplicate games (and mismatched tags)
-// happen. Fail open: on any error or timeout, Create stays Create.
+// If the player already has a live game, only the Create button for
+// THAT game's level becomes Resume pointing at it — other levels stay
+// Create, so a different level can still be started freely. Tapping
+// Create by accident on the same level while a game is alive is how
+// duplicate games (and mismatched tags) happen. Fail open: on any error
+// or timeout, Create stays Create.
 async function applyResumeButton() {
   const btns = createButtons();
   if (!btns.length) return;
+  restoreCreateButtons();
   btns.forEach(b => { b.disabled = true; });
   let live = null;
   try {
@@ -329,12 +343,18 @@ async function applyResumeButton() {
     ]);
   } catch (err) { live = null; }
   if (!live) { btns.forEach(b => { b.disabled = false; }); return; }
+  // Per-level: only the button matching the live game's level becomes
+  // Resume; every other level keeps its Create button and handler.
+  let matched = false;
   btns.forEach(b => {
-    b.textContent = 'Resume game';
     b.disabled = false;
-    b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(live.id); };
+    if (live.level && b.dataset.level === live.level) {
+      matched = true;
+      b.textContent = 'Resume game';
+      b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(live.id); };
+    }
   });
-  if (!$('newGameInstead')) {
+  if (matched && !$('newGameInstead')) {
     const nb = document.createElement('button');
     nb.id = 'newGameInstead';
     nb.className = 'ghost';
