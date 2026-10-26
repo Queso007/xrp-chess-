@@ -145,6 +145,7 @@ function showLobbyCards() {
   renderResume();
   $('lobbyCard').classList.remove('hidden');
   $('joinCard').classList.remove('hidden');
+  applyResumeButton();
 }
 
 async function tryXappSignIn() {
@@ -267,16 +268,18 @@ function renderResume() {
     b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(g.id); };
     $('resumeList').appendChild(b);
   });
-  pruneResumeList();
 }
 
 // Drop resume entries for games that are gone (wiped) or over, so the
 // list only ever offers live games. A network failure keeps entries —
-// never delete on a maybe. Re-renders only if something was dropped.
+// never delete on a maybe. Returns the most recent game confirmed live
+// (waiting, depositing, or playing), or null. Re-renders only if
+// something was dropped.
 async function pruneResumeList() {
   const list = savedGames();
-  if (!list.length) return;
+  if (!list.length) return null;
   let changed = false;
+  let live = null;
   const kept = [];
   for (const g of list) {
     try {
@@ -285,11 +288,59 @@ async function pruneResumeList() {
       const s = await r.json();
       if (s.state === 'ended') { changed = true; continue; }
       kept.push(g);
+      if (!live && (s.state === 'waiting' || s.state === 'depositing' || s.state === 'playing')) live = g;
     } catch (err) { kept.push(g); }
   }
   if (changed) {
     try { localStorage.setItem('cx_games', JSON.stringify(kept)); } catch (err) {}
     renderResume();
+  }
+  return live;
+}
+
+function createButtons() {
+  return [...document.querySelectorAll('button[data-level]')];
+}
+
+function restoreCreateButtons() {
+  createButtons().forEach(b => {
+    b.textContent = 'Create game';
+    b.disabled = false;
+    const level = b.dataset.level;
+    b.onclick = () => createGame(level);
+  });
+  const instead = $('newGameInstead');
+  if (instead) instead.remove();
+}
+
+// If the player already has a live game, the lobby's Create buttons
+// become Resume buttons pointing at it — tapping Create by accident
+// while a game is alive is how duplicate games (and mismatched tags)
+// happen. Fail open: on any error or timeout, Create stays Create.
+async function applyResumeButton() {
+  const btns = createButtons();
+  if (!btns.length) return;
+  btns.forEach(b => { b.disabled = true; });
+  let live = null;
+  try {
+    live = await Promise.race([
+      pruneResumeList(),
+      new Promise(res => setTimeout(() => res(null), 5000)),
+    ]);
+  } catch (err) { live = null; }
+  if (!live) { btns.forEach(b => { b.disabled = false; }); return; }
+  btns.forEach(b => {
+    b.textContent = 'Resume game';
+    b.disabled = false;
+    b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(live.id); };
+  });
+  if (!$('newGameInstead')) {
+    const nb = document.createElement('button');
+    nb.id = 'newGameInstead';
+    nb.className = 'ghost';
+    nb.textContent = 'Start a new game instead';
+    nb.onclick = restoreCreateButtons;
+    $('resumeCard').appendChild(nb);
   }
 }
 

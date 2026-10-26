@@ -29,7 +29,8 @@ _LAST_POLL_LOCK = threading.Lock()
 
 
 def _record_poll(rpc_url: str, dest_tag: int, ok: bool, error: str,
-                 tx_count: int, matched: int) -> None:
+                 tx_count: int, matched: int,
+                 ledger_index=None, recent=None) -> None:
     with _LAST_POLL_LOCK:
         LAST_POLL.clear()
         LAST_POLL.update({
@@ -40,6 +41,8 @@ def _record_poll(rpc_url: str, dest_tag: int, ok: bool, error: str,
             "error": (error or "")[:200],
             "tx_count": tx_count,
             "matched": matched,
+            "ledger_index": ledger_index,
+            "recent": recent or [],
         })
 
 
@@ -49,9 +52,23 @@ def get_last_poll() -> dict:
         return dict(LAST_POLL)
 
 
+def _tx_summary(tx: dict) -> dict:
+    """Public-ledger fields of one tx, enough to compare the watcher's view
+    against an independent ledger read. No secrets here."""
+    amount = tx.get("Amount")
+    return {
+        "hash": (tx.get("hash") or "")[:12],
+        "type": tx.get("TransactionType"),
+        "tag": tx.get("DestinationTag"),
+        "from": (tx.get("Account") or "")[:12],
+        "amount": amount if not isinstance(amount, dict) else "IOU",
+    }
+
+
 def _recent_escrow_txs(client: JsonRpcClient, escrow_address: str,
-                       limit: int = 100) -> list[dict]:
-    """Most recent transactions involving the escrow address (newest first).
+                       limit: int = 100) -> tuple[list[dict], object]:
+    """Most recent transactions involving the escrow address (newest first),
+    plus the node's ledger index (reveals a stuck/behind node).
 
     Raises RuntimeError when the node answers with an error (rate limit,
     bad request, ...) instead of returning an empty list that looks like
@@ -70,7 +87,7 @@ def _recent_escrow_txs(client: JsonRpcClient, escrow_address: str,
         tx = entry.get("tx") or entry.get("tx_json") or {}
         if tx:
             txs.append(tx)
-    return txs
+    return txs, result.get("ledger_index")
 
 
 def poll_deposits(
@@ -96,12 +113,12 @@ def poll_deposits(
 
     while time.time() < deadline:
         try:
-            txs = _recent_escrow_txs(client, escrow_address)
+            txs, ledger_index = _recent_escrow_txs(client, escrow_address)
             error = ""
         except Exception as exc:
             # Transient node hiccup (or rate limit): retry next poll, but
             # record it instead of silently looking like "no deposits".
-            txs = []
+            txs, ledger_index = [], None
             error = str(exc)
         for tx in txs:
             if tx.get("TransactionType") != "Payment":
@@ -117,7 +134,8 @@ def poll_deposits(
             if amount == str(expected_drops):
                 confirmed.add(sender)
         _record_poll(rpc_url, dest_tag, not error, error, len(txs),
-                     len(confirmed))
+                     len(confirmed), ledger_index,
+                     [_tx_summary(t) for t in txs[:3]])
         if confirmed == expected:
             return {addr: True for addr in confirmed}
         time.sleep(poll_interval)
