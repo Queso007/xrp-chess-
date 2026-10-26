@@ -95,7 +95,15 @@ def create_payment_payload(api_key: str, api_secret: str, destination: str,
                 },
             },
             "custom_meta": {
-                "identifier": f"cx-pay-{game_id}",
+                # Unique per attempt, not per game: Xaman rejects a second
+                # payload carrying an identifier it already saw (409
+                # conflict), so a retried Pay tap must not reuse the same
+                # identifier. The game id stays in it for traceability.
+                "identifier": (
+                    f"cx-pay-{game_id}-"
+                    + "".join(random.choice(string.ascii_lowercase + string.digits)
+                              for _ in range(6))
+                ),
                 "instruction": "Approve to pay your chess game stake.",
             },
         },
