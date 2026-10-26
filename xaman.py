@@ -90,7 +90,7 @@ def create_payment_payload(api_key: str, api_secret: str, destination: str,
             "options": {
                 "submit": True,
                 "return_url": {
-                    "app": "https://xumm.app/detect/xapp:sandbox.b99a93fc4ef4",
+                    "app": "https://xaman.app/detect/xapp:sandbox.b99a93fc4ef4",
                     "web": f"https://xrp-chess-c5b1.onrender.com/game.html?g={game_id}",
                 },
             },
