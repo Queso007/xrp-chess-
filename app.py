@@ -191,6 +191,19 @@ def levels():
     return jsonify({"levels": out, "dev_mode": config.DEV_MODE})
 
 
+@app.get("/api/diag/watcher")
+def diag_watcher():
+    """Watcher observability: which XRPL endpoint the deposit watcher is
+    actually using, and what its most recent poll saw. No secrets here —
+    only the network, the RPC URL, and the last poll record."""
+    return jsonify({
+        "network": config.XRPL_NETWORK,
+        "rpc_url": config.XRPL_JSON_RPC,
+        "dev_mode": config.DEV_MODE,
+        "last_poll": escrow_mod.get_last_poll(),
+    })
+
+
 @app.post("/api/games/create")
 def create_game():
     data = request.get_json(force=True, silent=True) or {}

@@ -8,7 +8,9 @@ Payouts are plain XRPL Payment transactions signed by the escrow wallet.
 """
 from __future__ import annotations
 
+import threading
 import time
+from datetime import datetime, timezone
 
 from xrpl.clients import JsonRpcClient
 from xrpl.models.requests import AccountTx
@@ -16,13 +18,53 @@ from xrpl.models.transactions import Payment
 from xrpl.transaction import submit_and_wait
 from xrpl.wallet import Wallet
 
+# ------------------------------------------------------- watcher status
+# The deposit watcher used to swallow every poll failure silently, so a
+# blind watcher looked exactly like "no deposits". These records make the
+# watcher's last poll observable (see /api/diag/watcher): which endpoint
+# it used, what it last received, and what error, if any, it last hit.
+# No secrets are ever recorded here.
+LAST_POLL: dict = {}
+_LAST_POLL_LOCK = threading.Lock()
+
+
+def _record_poll(rpc_url: str, dest_tag: int, ok: bool, error: str,
+                 tx_count: int, matched: int) -> None:
+    with _LAST_POLL_LOCK:
+        LAST_POLL.clear()
+        LAST_POLL.update({
+            "time_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "rpc_url": rpc_url,
+            "dest_tag": dest_tag,
+            "ok": ok,
+            "error": (error or "")[:200],
+            "tx_count": tx_count,
+            "matched": matched,
+        })
+
+
+def get_last_poll() -> dict:
+    """Copy of the most recent watcher poll record (empty if never polled)."""
+    with _LAST_POLL_LOCK:
+        return dict(LAST_POLL)
+
 
 def _recent_escrow_txs(client: JsonRpcClient, escrow_address: str,
                        limit: int = 100) -> list[dict]:
-    """Most recent transactions involving the escrow address (newest first)."""
+    """Most recent transactions involving the escrow address (newest first).
+
+    Raises RuntimeError when the node answers with an error (rate limit,
+    bad request, ...) instead of returning an empty list that looks like
+    "no deposits". Callers record the error and retry next poll.
+    """
     req = AccountTx(account=escrow_address, limit=limit, forward=False)
     resp = client.request(req)
-    entries = resp.result.get("transactions", [])
+    result = resp.result or {}
+    if result.get("status") == "error" or "error" in result:
+        raise RuntimeError(
+            f"XRPL {result.get('error')}: {result.get('error_message', '')}"
+        )
+    entries = result.get("transactions", [])
     txs = []
     for entry in entries:
         tx = entry.get("tx") or entry.get("tx_json") or {}
@@ -50,12 +92,17 @@ def poll_deposits(
     expected = set(player_addresses)
     confirmed: set[str] = set()
     deadline = time.time() + timeout_sec
+    rpc_url = getattr(client, "url", "?")
 
     while time.time() < deadline:
         try:
             txs = _recent_escrow_txs(client, escrow_address)
-        except Exception:
-            txs = []  # transient node hiccup: retry next poll
+            error = ""
+        except Exception as exc:
+            # Transient node hiccup (or rate limit): retry next poll, but
+            # record it instead of silently looking like "no deposits".
+            txs = []
+            error = str(exc)
         for tx in txs:
             if tx.get("TransactionType") != "Payment":
                 continue
@@ -69,6 +116,8 @@ def poll_deposits(
                 continue  # issued currency, not XRP — ignore
             if amount == str(expected_drops):
                 confirmed.add(sender)
+        _record_poll(rpc_url, dest_tag, not error, error, len(txs),
+                     len(confirmed))
         if confirmed == expected:
             return {addr: True for addr in confirmed}
         time.sleep(poll_interval)
