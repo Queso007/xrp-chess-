@@ -34,6 +34,21 @@ def _headers(api_key: str, api_secret: str) -> dict:
     }
 
 
+def _raise_with_body(resp) -> None:
+    """raise_for_status, but keep Xaman's error body.
+
+    Xaman's 400 responses carry the actual reason in the body (e.g. which
+    field it rejected). raise_for_status() alone discards it, which is why
+    the Pay button has only ever shown a bare "400" with no reason.
+    """
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(
+            f"Xaman {resp.status_code}: {(resp.text or '')[:500]}"
+        ) from exc
+
+
 def create_signin_payload(api_key: str, api_secret: str) -> dict:
     """Create a SignIn payload. Returns {uuid, qr, url} for the frontend."""
     resp = requests.post(
@@ -42,7 +57,7 @@ def create_signin_payload(api_key: str, api_secret: str) -> dict:
         json={"txjson": {"TransactionType": "SignIn"}},
         timeout=15,
     )
-    resp.raise_for_status()
+    _raise_with_body(resp)
     data = resp.json()
     refs = data.get("refs", {}) or {}
     nxt = data.get("next", {}) or {}
@@ -86,7 +101,7 @@ def create_payment_payload(api_key: str, api_secret: str, destination: str,
         },
         timeout=15,
     )
-    resp.raise_for_status()
+    _raise_with_body(resp)
     data = resp.json()
     nxt = data.get("next", {}) or {}
     return {
@@ -102,7 +117,7 @@ def poll_payload(api_key: str, api_secret: str, uuid: str) -> dict:
         headers=_headers(api_key, api_secret),
         timeout=15,
     )
-    resp.raise_for_status()
+    _raise_with_body(resp)
     data = resp.json()
     meta = data.get("meta", {}) or {}
     if meta.get("signed"):
@@ -126,7 +141,7 @@ def validate_ott(api_key: str, api_secret: str, ott: str) -> dict:
         headers=_headers(api_key, api_secret),
         timeout=15,
     )
-    resp.raise_for_status()
+    _raise_with_body(resp)
     data = resp.json()
     account = data.get("account")
     if not account:
