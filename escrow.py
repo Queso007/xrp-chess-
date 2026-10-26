@@ -8,6 +8,7 @@ Payouts are plain XRPL Payment transactions signed by the escrow wallet.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ _LAST_POLL_LOCK = threading.Lock()
 
 def _record_poll(rpc_url: str, dest_tag: int, ok: bool, error: str,
                  tx_count: int, matched: int,
-                 ledger_index=None, recent=None) -> None:
+                 ledger_index=None, recent=None, raw=None) -> None:
     with _LAST_POLL_LOCK:
         LAST_POLL.clear()
         LAST_POLL.update({
@@ -43,6 +44,7 @@ def _record_poll(rpc_url: str, dest_tag: int, ok: bool, error: str,
             "matched": matched,
             "ledger_index": ledger_index,
             "recent": recent or [],
+            "raw_newest": raw or [],
         })
 
 
@@ -52,23 +54,48 @@ def get_last_poll() -> dict:
         return dict(LAST_POLL)
 
 
-def _tx_summary(tx: dict) -> dict:
-    """Public-ledger fields of one tx, enough to compare the watcher's view
-    against an independent ledger read. No secrets here."""
+def _tx_summary(entry: dict) -> dict:
+    """Public-ledger fields of one account_tx entry, enough to compare the
+    watcher's view against an independent ledger read. No secrets here.
+    Reads the amount from every place it could live: tx.Amount,
+    tx.DeliverMax, and meta.delivered_amount."""
+    tx = entry.get("tx") or entry.get("tx_json") or {}
+    meta = entry.get("meta") or {}
     amount = tx.get("Amount")
+    delivered = meta.get("delivered_amount")
     return {
-        "hash": (tx.get("hash") or "")[:12],
+        "hash": (entry.get("hash") or tx.get("hash") or "")[:12],
         "type": tx.get("TransactionType"),
         "tag": tx.get("DestinationTag"),
         "from": (tx.get("Account") or "")[:12],
         "amount": amount if not isinstance(amount, dict) else "IOU",
+        "delivered": delivered if not isinstance(delivered, dict) else "IOU",
+        "deliver_max": tx.get("DeliverMax"),
+    }
+
+
+def _raw_entry(entry: dict) -> dict:
+    """Full raw shape of one account_tx entry (keys + truncated tx JSON),
+    so the next diag read shows exactly where the amount lives. All fields
+    here are public ledger data — no secrets."""
+    tx = entry.get("tx") or {}
+    tx_json = entry.get("tx_json") or {}
+    meta = entry.get("meta") or {}
+    return {
+        "entry_keys": sorted(entry.keys()),
+        "tx_keys": sorted(tx.keys()) if isinstance(tx, dict) else type(tx).__name__,
+        "tx_json_keys": sorted(tx_json.keys()) if isinstance(tx_json, dict) else None,
+        "meta_keys": sorted(meta.keys()) if isinstance(meta, dict) else None,
+        "entry_hash": (entry.get("hash") or "")[:16],
+        "entry_ledger_index": entry.get("ledger_index"),
+        "tx_full": json.dumps(tx, sort_keys=True)[:600] if isinstance(tx, dict) else str(tx)[:200],
     }
 
 
 def _recent_escrow_txs(client: JsonRpcClient, escrow_address: str,
                        limit: int = 100) -> tuple[list[dict], object]:
-    """Most recent transactions involving the escrow address (newest first),
-    plus the node's ledger index (reveals a stuck/behind node).
+    """Most recent account_tx entries involving the escrow address (newest
+    first), plus the node's ledger index (reveals a stuck/behind node).
 
     Raises RuntimeError when the node answers with an error (rate limit,
     bad request, ...) instead of returning an empty list that looks like
@@ -82,12 +109,12 @@ def _recent_escrow_txs(client: JsonRpcClient, escrow_address: str,
             f"XRPL {result.get('error')}: {result.get('error_message', '')}"
         )
     entries = result.get("transactions", [])
-    txs = []
-    for entry in entries:
-        tx = entry.get("tx") or entry.get("tx_json") or {}
-        if tx:
-            txs.append(tx)
-    return txs, result.get("ledger_index")
+    ledger_index = (
+        result.get("ledger_index")
+        or result.get("ledger_index_max")
+        or (entries[0].get("ledger_index") if entries else None)
+    )
+    return entries, ledger_index
 
 
 def poll_deposits(
@@ -113,14 +140,15 @@ def poll_deposits(
 
     while time.time() < deadline:
         try:
-            txs, ledger_index = _recent_escrow_txs(client, escrow_address)
+            entries, ledger_index = _recent_escrow_txs(client, escrow_address)
             error = ""
         except Exception as exc:
             # Transient node hiccup (or rate limit): retry next poll, but
             # record it instead of silently looking like "no deposits".
-            txs, ledger_index = [], None
+            entries, ledger_index = [], None
             error = str(exc)
-        for tx in txs:
+        for entry in entries:
+            tx = entry.get("tx") or entry.get("tx_json") or {}
             if tx.get("TransactionType") != "Payment":
                 continue
             if tx.get("DestinationTag") != dest_tag:
@@ -128,14 +156,22 @@ def poll_deposits(
             sender = tx.get("Account")
             if sender not in expected or sender in confirmed:
                 continue
-            amount = tx.get("Amount")
-            if isinstance(amount, dict):
-                continue  # issued currency, not XRP — ignore
-            if amount == str(expected_drops):
+            # The amount can live in tx.Amount, in meta.delivered_amount,
+            # or (rarely) in tx.DeliverMax. Accept an exact match in any of
+            # them; dict amounts are issued currency, not XRP — ignore.
+            meta = entry.get("meta") or {}
+            candidates = [
+                tx.get("Amount"),
+                meta.get("delivered_amount"),
+                tx.get("DeliverMax"),
+            ]
+            if any(c == str(expected_drops) for c in candidates
+                   if not isinstance(c, dict)):
                 confirmed.add(sender)
-        _record_poll(rpc_url, dest_tag, not error, error, len(txs),
+        _record_poll(rpc_url, dest_tag, not error, error, len(entries),
                      len(confirmed), ledger_index,
-                     [_tx_summary(t) for t in txs[:3]])
+                     [_tx_summary(e) for e in entries[:3]],
+                     [_raw_entry(e) for e in entries[:2]])
         if confirmed == expected:
             return {addr: True for addr in confirmed}
         time.sleep(poll_interval)
