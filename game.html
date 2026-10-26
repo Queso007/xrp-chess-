@@ -337,7 +337,23 @@ $('payBtn').onclick = async () => {
     // Straight-to-game: remember this game so the lobby can send the
     // player straight back here after signing, instead of needing resume.
     try { sessionStorage.setItem('cx_return_to_game', gameId); } catch (err) { /* ignore */ }
-    location.href = data.url;
+    // Do NOT redirect this page to the sign URL: inside the xApp webview
+    // that navigation renders as a black screen. Instead, turn the button
+    // into a tap that opens the sign request in a new context, so the
+    // phone routes it to the Xaman app (or a browser) and this game page
+    // stays alive behind it.
+    $('status').textContent = 'Payment ready — tap the button below to approve it in Xaman.';
+    $('payBtn').textContent = 'Tap to sign in Xaman';
+    $('payBtn').disabled = false;
+    $('payBtn').onclick = () => {
+      const a = document.createElement('a');
+      a.href = data.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
   } catch (err) {
     $('status').textContent = 'Could not build payment: ' + err.message + ' — you can still pay manually with the address and tag above.';
     $('payBtn').disabled = false;
