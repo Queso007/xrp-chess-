@@ -91,9 +91,9 @@ def stake_drops(level_key: str) -> int:
 # -------------------------------------------------------------- timeouts
 # How long a player may go without a heartbeat before being treated as
 # having abandoned the game.
-# Mid-game leave-timer (user-set 90s): the window a player gets to switch
-# accounts and sign back in before forfeiting.
-ABANDON_TIMEOUT_SEC = int(os.environ.get("ABANDON_TIMEOUT_SEC", "90"))
+# Mid-game leave-timer (user-set 2 minutes): the window a player gets to
+# switch accounts and sign back in before forfeiting.
+ABANDON_TIMEOUT_SEC = int(os.environ.get("ABANDON_TIMEOUT_SEC", "120"))
 # How long a player who has not yet made their first move may go without
 # a heartbeat before forfeiting. Longer than the leave-timer, so a game
 # can never end by forfeit before a player's first move.

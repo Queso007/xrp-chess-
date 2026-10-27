@@ -81,7 +81,7 @@ class Game:
         level_cfg: dict,
         operator_address: str,
         escrow_address: str = "",
-        abandon_timeout: int = 90,
+        abandon_timeout: int = 120,
         first_move_timeout: int = 300,
         preplay_abandon_timeout: int = 1800,
         deposit_timeout: int = 600,
@@ -355,7 +355,7 @@ class Game:
             # longer first-move window, so the game can never end by
             # forfeit before their first move (still loading, still in
             # the lobby, brief disconnect). Once a player has moved,
-            # the 90s leave-timer applies (the account-switch window).
+            # the 2-minute leave-timer applies (the account-switch window).
             abandoners = [
                 p["color"]
                 for p in self.players.values()
@@ -467,6 +467,21 @@ class Game:
     # --------------------------------------------------------------- view
     def to_dict(self) -> dict:
         self._tick()
+        now = time.time()
+        players = []
+        for p in self.players.values():
+            entry = {"address": p["address"], "color": p["color"],
+                     "deposited": p["deposited"]}
+            if self.state == PLAYING:
+                # Seconds until this player auto-resigns for silence: the
+                # first-move window before their first move, the
+                # leave-timer after it. The frontend shows it next to
+                # each player's clock as the auto-resign countdown.
+                timeout = (self.first_move_timeout
+                           if not p.get("has_moved") else self.abandon_timeout)
+                entry["abandon_in_sec"] = max(
+                    0, int(timeout - (now - p["last_heartbeat"])))
+            players.append(entry)
         return {
             "game_id": self.game_id,
             "level": self.level_key,
@@ -477,11 +492,7 @@ class Game:
             "state": self.state,
             "dest_tag": self.dest_tag,
             "escrow_address": self.escrow_address,
-            "players": [
-                {"address": p["address"], "color": p["color"],
-                 "deposited": p["deposited"]}
-                for p in self.players.values()
-            ],
+            "players": players,
             "turn": "white" if self.board.turn == chess.WHITE else "black",
             "fen": self.board.fen(),
             "clocks_ms": dict(self.clocks),
