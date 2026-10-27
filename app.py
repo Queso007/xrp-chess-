@@ -219,6 +219,7 @@ def create_game():
         operator_address=config.OPERATOR_ADDRESS,
         escrow_address=config.ESCROW_ADDRESS,
         abandon_timeout=config.ABANDON_TIMEOUT_SEC,
+        first_move_timeout=config.FIRST_MOVE_TIMEOUT_SEC,
         deposit_timeout=config.DEPOSIT_TIMEOUT_SEC,
     )
     with _games_lock:
@@ -272,6 +273,7 @@ def find_or_create():
             operator_address=config.OPERATOR_ADDRESS,
             escrow_address=config.ESCROW_ADDRESS,
             abandon_timeout=config.ABANDON_TIMEOUT_SEC,
+            first_move_timeout=config.FIRST_MOVE_TIMEOUT_SEC,
             deposit_timeout=config.DEPOSIT_TIMEOUT_SEC,
         )
         _games[game.game_id] = game

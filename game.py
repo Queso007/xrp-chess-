@@ -81,7 +81,8 @@ class Game:
         level_cfg: dict,
         operator_address: str,
         escrow_address: str = "",
-        abandon_timeout: int = 60,
+        abandon_timeout: int = 90,
+        first_move_timeout: int = 300,
         preplay_abandon_timeout: int = 1800,
         deposit_timeout: int = 600,
         game_id: str | None = None,
@@ -99,6 +100,7 @@ class Game:
         self.operator_address = operator_address
         self.escrow_address = escrow_address
         self.abandon_timeout = abandon_timeout
+        self.first_move_timeout = first_move_timeout
         self.preplay_abandon_timeout = preplay_abandon_timeout
         self.deposit_timeout = deposit_timeout
         # Unique 32-bit destination tag so deposits for this game can be
@@ -157,6 +159,7 @@ class Game:
             "color": None,
             "last_heartbeat": time.time(),
             "deposited": False,
+            "has_moved": False,
         }
         if len(self.players) == 2:
             self._begin_depositing()
@@ -252,6 +255,7 @@ class Game:
             return {"ok": False, "error": f"illegal move: {uci}"}
 
         self.board.push(move)
+        self.players[address]["has_moved"] = True
         # Increment is added to the mover AFTER a legal move completes.
         self.clocks[color] += self.increment_ms
         self.draw_offer_by = None  # a move implicitly declines a draw offer
@@ -347,10 +351,18 @@ class Game:
                 self._finish(END_FLAG, winner=self._opponent(mover))
                 events.append({"type": "end", "reason": END_FLAG})
                 return events
+            # First-move grace: a player who has not moved yet gets the
+            # longer first-move window, so the game can never end by
+            # forfeit before their first move (still loading, still in
+            # the lobby, brief disconnect). Once a player has moved,
+            # the 90s leave-timer applies (the account-switch window).
             abandoners = [
                 p["color"]
                 for p in self.players.values()
-                if now - p["last_heartbeat"] > self.abandon_timeout
+                if now - p["last_heartbeat"] > (
+                    self.abandon_timeout if p.get("has_moved")
+                    else self.first_move_timeout
+                )
             ]
             if len(abandoners) == 2:
                 self._finish(END_ABANDON_DOUBLE)
@@ -367,8 +379,8 @@ class Game:
             # Someone walked away before stakes were locked: no contest,
             # refund whatever was deposited.
             # Pre-play uses a much longer silence window than mid-game:
-            # paying and switching wallets takes minutes, and the 60s
-            # mid-game timer would cancel games while players pay.
+            # paying and switching wallets takes minutes, and the
+            # mid-game leave-timer would cancel games while players pay.
             # (DEPOSITING games still end at the 600s deposit deadline.)
             if any(now - p["last_heartbeat"] > self.preplay_abandon_timeout
                    for p in self.players.values()):

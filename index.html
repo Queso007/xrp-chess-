@@ -155,8 +155,13 @@ async function tryXappSignIn() {
   // call 404'd on Xaman's side, which is why the last attempt failed).
   // In a normal browser there is no token, so this silently does nothing
   // and the regular QR flow below is used instead.
+  // ALWAYS validate when a token is present, even if an address is already
+  // cached. The old `|| myAddress` skip meant switching wallets in Xaman
+  // never updated the app's identity: the lobby and the game page kept
+  // heartbeating as the old wallet while the new wallet never appeared,
+  // so the new wallet's side forfeited. The SDK account wins over cache.
   const ott = new URLSearchParams(location.search).get('xAppToken');
-  if (!ott || myAddress) return 'absent';
+  if (!ott) return 'absent';
   const s0 = $('xappStatus');
   s0.textContent = 'Signing you in via Xaman…';
   s0.classList.remove('hidden');
@@ -169,6 +174,8 @@ async function tryXappSignIn() {
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
     ]);
     if (!account) throw new Error('no account');
+    // Wallet switch: the SDK account overwrites any cached address, so
+    // the game page heartbeats as the wallet actually signed in now.
     myAddress = account;
     sessionStorage.setItem('cx_address', myAddress);
     try {
@@ -178,13 +185,15 @@ async function tryXappSignIn() {
     } catch (err) { /* token stays in URL; sign-in still counts */ }
     showAuthed();
     return 'ok';
-  } catch (err) { /* fall through to the QR flow */ }
+  } catch (err) { /* fall through to the cached address / QR flow */ }
   return 'failed';
 }
 
 async function init() {
   const xapp = await tryXappSignIn();
-  if (xapp === 'failed') {
+  // Only warn when there is no cached wallet to fall back on: a failed
+  // re-validation with a cached address still shows the lobby as usual.
+  if (xapp === 'failed' && !myAddress) {
     const s = $('xappStatus');
     s.textContent = 'Automatic Xaman sign-in did not work — reopen the xApp from inside Xaman, or sign in with the QR code in a browser.';
     s.classList.remove('hidden');
