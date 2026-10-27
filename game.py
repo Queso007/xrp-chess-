@@ -8,18 +8,18 @@ every end condition (checkmate, flag, abandon, draw, ...) is computed here.
 Payout rules (S = stake per player, in drops; all math is integer):
   * Decisive win (checkmate / resign / flag on time):
         winner   -> S + (S*9//10)      (their stake + 90% of loser's stake)
-        operator -> S - (S*9//10)      (10% of loser's stake)
+        kept     -> S - (S*9//10)      (10% of loser's stake stays in escrow)
   * Single abandon: the abandoner FORFEITS (gets 0). The remaining player is
     treated exactly like a decisive winner:
         winner   -> S + (S*9//10)
-        operator -> S - (S*9//10)
+        kept     -> S - (S*9//10)
         leaver   -> 0
   * Draw (agreement / stalemate / fifty-move / repetition / material):
         each player -> S*95//100
-        operator    -> 2*(S - S*95//100)
+        kept        -> 2*(S - S*95//100)
   * Double abandon (both time out):
         each player -> S*975//1000
-        operator    -> 2*(S - S*975//1000)
+        kept        -> 2*(S - S*975//1000)
   * Cancelled before play (deposit phase): confirmed deposits refunded in
     full, no rake.
 """
@@ -406,20 +406,22 @@ class Game:
         """Payout list of (address, drops, memo) per the game rules.
 
         Integer drops throughout. Every terminal path conserves funds:
-        the sum of all payouts always equals the total staked (2*S), except
+        the sum of all rows always equals the total staked (2*S), except
         END_CANCELLED which refunds only what was actually deposited.
+        Rows addressed to the escrow wallet are KEPT, not submitted: the
+        rake stays in escrow instead of being paid to the operator. The
+        settlement layer skips escrow-addressed rows when submitting.
         """
         S = self.stake_drops
         if S == 0:
             # Practice game: nothing was staked, so nothing is ever paid
             # out — on any end path (win, draw, abandon, cancel).
             return []
-        op = self.operator_address
         payouts: list[tuple[str, int, str]] = []
 
         if self.end_reason in DECISIVE_ENDS:
             # Winner takes their stake + 90% of the loser's stake;
-            # operator takes the remaining 10% of the loser's stake.
+            # the remaining 10% stays in the escrow wallet (kept, not sent).
             # Single abandon lands here too: the leaver forfeits (0) and the
             # remaining player is the winner.
             winner_addr = self._address_of(self.winner)
@@ -432,7 +434,8 @@ class Game:
                                 "Winnings - opponent forfeited"))
             else:
                 payouts.append((winner_addr, winner_share, "Match winnings"))
-            payouts.append((op, rake, "Operator rake (10% of loser's stake)"))
+            payouts.append((self.escrow_address, rake,
+                            "Rake kept in escrow (10% of loser's stake)"))
 
         elif self.end_reason in DRAW_ENDS:
             refund = S * 95 // 100
@@ -440,7 +443,8 @@ class Game:
             for color in ("white", "black"):
                 payouts.append((self._address_of(color), refund,
                                 "Draw refund (95%)"))
-            payouts.append((op, rake, "Operator rake (5% per player)"))
+            payouts.append((self.escrow_address, rake,
+                            "Rake kept in escrow (5% per player)"))
 
         elif self.end_reason == END_ABANDON_DOUBLE:
             refund = S * 975 // 1000
@@ -448,7 +452,8 @@ class Game:
             for color in ("white", "black"):
                 payouts.append((self._address_of(color), refund,
                                 "Double-abandon refund (97.5%)"))
-            payouts.append((op, rake, "Operator rake (2.5% per player)"))
+            payouts.append((self.escrow_address, rake,
+                            "Rake kept in escrow (2.5% per player)"))
 
         elif self.end_reason == END_CANCELLED:
             # Refund confirmed deposits in full; operator takes nothing.

@@ -58,9 +58,14 @@ def _settle_and_broadcast(game_id: str) -> None:
     if game is None:
         return
     payouts = list(game.payouts)
+    # Rows addressed to the escrow wallet are KEPT, not submitted: the rake
+    # stays in escrow instead of being paid to the operator. They still
+    # appear in the broadcast entries below (with no tx hash) so the
+    # game-over screen shows where the rake went.
+    sendable = [p for p in payouts if p[0] != game.escrow_address]
     try:
         hashes = escrow_mod.send_payouts(
-            xrpl_client, config.ESCROW_SEED, payouts, dev_mode=config.DEV_MODE
+            xrpl_client, config.ESCROW_SEED, sendable, dev_mode=config.DEV_MODE
         )
     except Exception as exc:  # settlement must never silently vanish
         # Allow a later poll to retry: construction errors (e.g. bad memo
