@@ -18,8 +18,6 @@
   .clock .time { font-size:1.5rem; font-weight:800; font-variant-numeric:tabular-nums; }
   .clock.active .time { color:var(--accent); }
   .clock.low .time { color:var(--danger); }
-  .clock .abandon { font-size:.75rem; color:var(--muted); text-align:right; }
-  .clock .abandon.low { color:var(--danger); }
   #board { width:100%; max-width:520px; margin:0 auto; }
   #board .square-55d63 { position:relative; }
   #board .square-55d63.selected-square { box-shadow:inset 0 0 0 3px var(--accent); }
@@ -48,10 +46,10 @@
     <div><span class="stake" id="stakeLabel"></span> · <span id="levelLabel" class="muted"></span></div>
   </div>
 
-  <div class="clock" id="clockTop"><div><div class="name" id="nameTop">Opponent</div></div><div><div class="time" id="timeTop">--:--</div><div class="abandon" id="abandonTop"></div></div></div>
+  <div class="clock" id="clockTop"><div><div class="name" id="nameTop">Opponent</div></div><div class="time" id="timeTop">--:--</div></div>
   <div id="board"></div>
   <p class="muted" style="text-align:center;margin:6px 0">Tap a piece, then tap where it goes.</p>
-  <div class="clock" id="clockBottom"><div><div class="name" id="nameBottom">You</div></div><div><div class="time" id="timeBottom">--:--</div><div class="abandon" id="abandonBottom"></div></div></div>
+  <div class="clock" id="clockBottom"><div><div class="name" id="nameBottom">You</div></div><div class="time" id="timeBottom">--:--</div></div>
 
   <div id="status">Connecting…</div>
 
@@ -94,7 +92,7 @@ if (!gameId) location.href = '/';
 if (!myAddress) location.href = '/';
 
 const socket = io();
-let board = null, myColor = null, state = null, lastSync = 0, abandonSnap = null;
+let board = null, myColor = null, state = null, lastSync = 0;
 
 function fmt(ms) {
   ms = Math.max(0, ms);
@@ -170,18 +168,6 @@ function initBoard() {
 
 function render(s) {
   state = s; lastSync = Date.now();
-  // Auto-resign countdown snapshot: seconds left before each player
-  // forfeits for silence, as of this state. The ticker counts it down
-  // locally between server syncs (every ~3s while playing).
-  if (s.state === 'playing' && s.players) {
-    const byColor = {};
-    s.players.forEach(p => { if (p.color && p.abandon_in_sec != null) byColor[p.color] = p.abandon_in_sec; });
-    abandonSnap = {byColor, at: Date.now()};
-  } else {
-    abandonSnap = null;
-    $('abandonTop').textContent = '';
-    $('abandonBottom').textContent = '';
-  }
   clearSelection();
   // Ended games can't be resumed: drop them from the lobby resume list
   // so dead games stop being offered.
@@ -238,7 +224,6 @@ setInterval(() => {
   const c = {...state.clocks_ms};
   c[state.turn] = Math.max(0, c[state.turn] - elapsed);
   paintClocks(c, state.turn);
-  paintAbandon();
 }, 250);
 
 function paintClocks(c, turn) {
@@ -252,25 +237,6 @@ function paintClocks(c, turn) {
   };
   paint('clockTop', 'timeTop', topColor);
   paint('clockBottom', 'timeBottom', botColor);
-}
-
-// Auto-resign countdown next to each player's clock: seconds until that
-// player forfeits for silence, counted down locally between syncs.
-function paintAbandon() {
-  if (!abandonSnap) return;
-  const topIsWhite = board.orientation() === 'white';
-  const topColor = topIsWhite ? 'black' : 'white';
-  const botColor = topIsWhite ? 'white' : 'black';
-  const paint = (el, color) => {
-    const node = $(el);
-    const sec = abandonSnap.byColor[color];
-    if (sec == null) { node.textContent = ''; return; }
-    const remain = Math.max(0, sec - (Date.now() - abandonSnap.at) / 1000);
-    node.textContent = 'Auto resign in ' + fmt(Math.ceil(remain) * 1000);
-    node.classList.toggle('low', remain < 30);
-  };
-  paint('abandonTop', topColor);
-  paint('abandonBottom', botColor);
 }
 
 socket.on('connect', () => {

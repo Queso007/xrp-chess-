@@ -89,17 +89,10 @@ def stake_drops(level_key: str) -> int:
 
 
 # -------------------------------------------------------------- timeouts
-# How long a player may go without a heartbeat before being treated as
-# having abandoned the game.
-# Mid-game leave-timer (user-set 2 minutes): the window a player gets to
-# switch accounts and sign back in before forfeiting.
-ABANDON_TIMEOUT_SEC = int(os.environ.get("ABANDON_TIMEOUT_SEC", "120"))
-# How long a player who has not yet made their first move may go without
-# a heartbeat before forfeiting. Longer than the leave-timer, so a game
-# can never end by forfeit before a player's first move.
-FIRST_MOVE_TIMEOUT_SEC = int(os.environ.get("FIRST_MOVE_TIMEOUT_SEC", "300"))
-# How often the frontend should send heartbeats (should be well under the
-# abandon timeout).
+# NOTE: there is no abandon timer during play anymore (removed at the
+# user's request): a PLAYING game stays open for its duration and only
+# ends by chess result. Heartbeats still feed the pre-play silence window
+# below, so the frontend keeps sending them.
 HEARTBEAT_INTERVAL_SEC = int(os.environ.get("HEARTBEAT_INTERVAL_SEC", "15"))
 # How long the backend waits for both on-ledger stake deposits.
 DEPOSIT_TIMEOUT_SEC = int(os.environ.get("DEPOSIT_TIMEOUT_SEC", "600"))

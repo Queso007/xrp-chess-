@@ -81,8 +81,6 @@ class Game:
         level_cfg: dict,
         operator_address: str,
         escrow_address: str = "",
-        abandon_timeout: int = 120,
-        first_move_timeout: int = 300,
         preplay_abandon_timeout: int = 1800,
         deposit_timeout: int = 600,
         game_id: str | None = None,
@@ -99,8 +97,6 @@ class Game:
         self.increment_ms = int(level_cfg["increment_seconds"]) * 1000
         self.operator_address = operator_address
         self.escrow_address = escrow_address
-        self.abandon_timeout = abandon_timeout
-        self.first_move_timeout = first_move_timeout
         self.preplay_abandon_timeout = preplay_abandon_timeout
         self.deposit_timeout = deposit_timeout
         # Unique 32-bit destination tag so deposits for this game can be
@@ -159,7 +155,6 @@ class Game:
             "color": None,
             "last_heartbeat": time.time(),
             "deposited": False,
-            "has_moved": False,
         }
         if len(self.players) == 2:
             self._begin_depositing()
@@ -255,7 +250,6 @@ class Game:
             return {"ok": False, "error": f"illegal move: {uci}"}
 
         self.board.push(move)
-        self.players[address]["has_moved"] = True
         # Increment is added to the mover AFTER a legal move completes.
         self.clocks[color] += self.increment_ms
         self.draw_offer_by = None  # a move implicitly declines a draw offer
@@ -341,7 +335,7 @@ class Game:
         return {"ok": True}
 
     def check_timeouts(self, now: float | None = None) -> list[dict]:
-        """Periodic server check. Returns events (flag/abandon/cancel)."""
+        """Periodic server check. Returns events (flag/cancel)."""
         now = now if now is not None else time.time()
         events: list[dict] = []
         if self.state == PLAYING:
@@ -351,36 +345,17 @@ class Game:
                 self._finish(END_FLAG, winner=self._opponent(mover))
                 events.append({"type": "end", "reason": END_FLAG})
                 return events
-            # First-move grace: a player who has not moved yet gets the
-            # longer first-move window, so the game can never end by
-            # forfeit before their first move (still loading, still in
-            # the lobby, brief disconnect). Once a player has moved,
-            # the 2-minute leave-timer applies (the account-switch window).
-            abandoners = [
-                p["color"]
-                for p in self.players.values()
-                if now - p["last_heartbeat"] > (
-                    self.abandon_timeout if p.get("has_moved")
-                    else self.first_move_timeout
-                )
-            ]
-            if len(abandoners) == 2:
-                self._finish(END_ABANDON_DOUBLE)
-                events.append({"type": "end", "reason": END_ABANDON_DOUBLE})
-            elif len(abandoners) == 1:
-                leaver = abandoners[0]
-                # Single abandon is a FORFEIT: leaver gets nothing, the
-                # remaining player wins as if by decisive result.
-                self._finish(END_ABANDON, winner=self._opponent(leaver),
-                             leaver=leaver)
-                events.append({"type": "end", "reason": END_ABANDON,
-                               "leaver": leaver})
+            # No abandon timer during play: a PLAYING game stays open for
+            # its duration and only ends by chess result — flag here,
+            # checkmate/resign/draw via moves. Silence never forfeits,
+            # so switching accounts mid-game cannot end it. (A game with
+            # both players gone still resolves: the mover's clock keeps
+            # ticking and flags them.)
         elif self.state in (WAITING, DEPOSITING):
             # Someone walked away before stakes were locked: no contest,
             # refund whatever was deposited.
-            # Pre-play uses a much longer silence window than mid-game:
-            # paying and switching wallets takes minutes, and the
-            # mid-game leave-timer would cancel games while players pay.
+            # Pre-play uses a long silence window: paying and switching
+            # wallets takes minutes.
             # (DEPOSITING games still end at the 600s deposit deadline.)
             if any(now - p["last_heartbeat"] > self.preplay_abandon_timeout
                    for p in self.players.values()):
@@ -467,21 +442,6 @@ class Game:
     # --------------------------------------------------------------- view
     def to_dict(self) -> dict:
         self._tick()
-        now = time.time()
-        players = []
-        for p in self.players.values():
-            entry = {"address": p["address"], "color": p["color"],
-                     "deposited": p["deposited"]}
-            if self.state == PLAYING:
-                # Seconds until this player auto-resigns for silence: the
-                # first-move window before their first move, the
-                # leave-timer after it. The frontend shows it next to
-                # each player's clock as the auto-resign countdown.
-                timeout = (self.first_move_timeout
-                           if not p.get("has_moved") else self.abandon_timeout)
-                entry["abandon_in_sec"] = max(
-                    0, int(timeout - (now - p["last_heartbeat"])))
-            players.append(entry)
         return {
             "game_id": self.game_id,
             "level": self.level_key,
@@ -492,7 +452,11 @@ class Game:
             "state": self.state,
             "dest_tag": self.dest_tag,
             "escrow_address": self.escrow_address,
-            "players": players,
+            "players": [
+                {"address": p["address"], "color": p["color"],
+                 "deposited": p["deposited"]}
+                for p in self.players.values()
+            ],
             "turn": "white" if self.board.turn == chess.WHITE else "black",
             "fen": self.board.fen(),
             "clocks_ms": dict(self.clocks),

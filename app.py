@@ -35,6 +35,10 @@ xrpl_client = JsonRpcClient(config.XRPL_JSON_RPC)
 
 _games: dict[str, Game] = {}
 _games_lock = threading.Lock()
+# Game ids with a deposit watcher currently running. Used to dedup watcher
+# tasks and by the supervisor safety net, so a DEPOSITING game always has
+# exactly one watcher turning two on-ledger stakes into a started game.
+_watching: set[str] = set()
 
 
 # ------------------------------------------------------------ helpers
@@ -114,38 +118,67 @@ def _settle_and_broadcast(game_id: str) -> None:
     )
 
 
-def _watch_deposits(game_id: str) -> None:
-    """Background task: wait for both on-ledger stakes, then start clocks."""
-    game = _get_game(game_id)
-    if game is None or game.state != "depositing":
-        return
-    players = [p["address"] for p in game.players.values()]
-    try:
-        confirmed = escrow_mod.poll_deposits(
-            xrpl_client,
-            config.ESCROW_ADDRESS,
-            game.dest_tag,
-            game.stake_drops,
-            players,
-            timeout_sec=config.DEPOSIT_TIMEOUT_SEC,
-        )
-    except TimeoutError:
-        socketio.emit("deposit_timeout", {"game_id": game_id}, room=game_id)
-        return
+def _ensure_watcher(game_id: str) -> None:
+    """Start the deposit watcher for a DEPOSITING game, if not running.
+
+    The watcher is what turns two on-ledger stakes into a started game,
+    so a DEPOSITING game must never sit without one. Callers: the socket
+    join (immediate) and the supervisor (safety net every 3s, covering
+    HTTP joins and any watcher that died early). Deduped via _watching.
+    Must be called WITHOUT _games_lock held (it takes the lock itself).
+    """
     with _games_lock:
         game = _games.get(game_id)
         if game is None or game.state != "depositing":
             return
-        for addr in confirmed:
-            game.confirm_deposit(addr)
-        started = game.begin_play()
-        state = game.to_dict()
-    if started:
-        socketio.emit("game_state", state, room=game_id)
+        if game_id in _watching:
+            return
+        _watching.add(game_id)
+    try:
+        socketio.start_background_task(_watch_deposits, game_id)
+    except Exception:
+        # Spawn failed: drop the marker so the next supervisor tick
+        # retries instead of leaving the game watcher-less.
+        with _games_lock:
+            _watching.discard(game_id)
+
+
+def _watch_deposits(game_id: str) -> None:
+    """Background task: wait for both on-ledger stakes, then start clocks."""
+    try:
+        game = _get_game(game_id)
+        if game is None or game.state != "depositing":
+            return
+        players = [p["address"] for p in game.players.values()]
+        try:
+            confirmed = escrow_mod.poll_deposits(
+                xrpl_client,
+                config.ESCROW_ADDRESS,
+                game.dest_tag,
+                game.stake_drops,
+                players,
+                timeout_sec=config.DEPOSIT_TIMEOUT_SEC,
+            )
+        except TimeoutError:
+            socketio.emit("deposit_timeout", {"game_id": game_id}, room=game_id)
+            return
+        with _games_lock:
+            game = _games.get(game_id)
+            if game is None or game.state != "depositing":
+                return
+            for addr in confirmed:
+                game.confirm_deposit(addr)
+            started = game.begin_play()
+            state = game.to_dict()
+        if started:
+            socketio.emit("game_state", state, room=game_id)
+    finally:
+        with _games_lock:
+            _watching.discard(game_id)
 
 
 def _supervisor() -> None:
-    """Periodic tick: flags, abandonment, deposit deadlines, clock sync."""
+    """Periodic tick: flags, deposit deadlines, watcher safety net, clock sync."""
     while True:
         socketio.sleep(3)
         now = time.time()
@@ -164,6 +197,12 @@ def _supervisor() -> None:
                 if ended_event:
                     _settle_if_ended(game)
                 state = game.to_dict()
+            if game.state == "depositing":
+                # Safety net: a DEPOSITING game must always have a watcher
+                # turning two on-ledger stakes into a started game. This
+                # covers HTTP joins (which never start one directly) and
+                # any watcher task that died early.
+                _ensure_watcher(game.game_id)
             if game.state == "playing":
                 # Keep client clocks in sync; server remains authoritative.
                 socketio.emit("game_state", state, room=game.game_id)
@@ -223,8 +262,6 @@ def create_game():
         level_cfg=config.LEVELS[level],
         operator_address=config.OPERATOR_ADDRESS,
         escrow_address=config.ESCROW_ADDRESS,
-        abandon_timeout=config.ABANDON_TIMEOUT_SEC,
-        first_move_timeout=config.FIRST_MOVE_TIMEOUT_SEC,
         deposit_timeout=config.DEPOSIT_TIMEOUT_SEC,
     )
     with _games_lock:
@@ -277,8 +314,6 @@ def find_or_create():
             level_cfg=config.LEVELS[level],
             operator_address=config.OPERATOR_ADDRESS,
             escrow_address=config.ESCROW_ADDRESS,
-            abandon_timeout=config.ABANDON_TIMEOUT_SEC,
-            first_move_timeout=config.FIRST_MOVE_TIMEOUT_SEC,
             deposit_timeout=config.DEPOSIT_TIMEOUT_SEC,
         )
         _games[game.game_id] = game
@@ -412,14 +447,13 @@ def on_join(data):
             emit("error", {"message": res.get("error")})
             return
         join_room(game_id)
-        start_watcher = game.state == "depositing"
         state = game.to_dict()
     emit("joined", {"game_id": game_id, "color": res.get("color"),
                     "rejoined": res.get("rejoined")})
     socketio.emit("game_state", state, room=game_id)
-    if start_watcher:
-        # Only the first of the two joins triggers this (state flips once).
-        socketio.start_background_task(_watch_deposits, game_id)
+    # If this join flipped the game to DEPOSITING, start its watcher
+    # (deduped; the supervisor also ensures one within 3s).
+    _ensure_watcher(game_id)
 
 
 @socketio.on("move")

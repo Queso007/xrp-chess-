@@ -289,7 +289,7 @@ async function pruneResumeList() {
   const list = savedGames();
   if (!list.length) return null;
   let changed = false;
-  let live = null;
+  let liveOwn = null, liveJoin = null;
   const kept = [];
   for (const g of list) {
     try {
@@ -297,17 +297,27 @@ async function pruneResumeList() {
       if (!r.ok) { changed = true; continue; }
       const s = await r.json();
       if (s.state === 'ended') { changed = true; continue; }
-      // Resume is only for YOUR open game: drop saved games where the
-      // signed-in wallet is not a player (e.g. the other wallet's game
-      // on a shared device). Fail open if the player list is missing.
+      // A WAITING game has no stakes locked, so anyone may join it: keep
+      // it even when the signed-in wallet is not a player yet. This is
+      // how wallet 2 returns to wallet 1's waiting game instead of
+      // creating a new game with a new tag (which scattered payments and
+      // left every game stuck at 1/2). DEPOSITING/PLAYING games are only
+      // resumable by their own players. Fail open if the player list is
+      // missing.
       const players = s.players || null;
-      if (myAddress && players && !players.some(p => p.address === myAddress)) {
-        changed = true; continue;
-      }
-      kept.push(g);
-      if (!live && (s.state === 'waiting' || s.state === 'depositing' || s.state === 'playing')) {
+      const isPlayer = !myAddress || !players || players.some(p => p.address === myAddress);
+      if (s.state === 'waiting') {
+        kept.push(g);
         // Prefer the server's level (covers join-via-link saves with no level).
-        live = {...g, level: s.level || g.level || ''};
+        const entry = {...g, level: s.level || g.level || '', is_player: isPlayer};
+        if (isPlayer) { if (!liveOwn) liveOwn = entry; }
+        else { if (!liveJoin) liveJoin = entry; }
+      } else if (s.state === 'depositing' || s.state === 'playing') {
+        if (!isPlayer) { changed = true; continue; }
+        kept.push(g);
+        if (!liveOwn) liveOwn = {...g, level: s.level || g.level || '', is_player: true};
+      } else {
+        kept.push(g);
       }
     } catch (err) { kept.push(g); }
   }
@@ -315,7 +325,9 @@ async function pruneResumeList() {
     try { localStorage.setItem('cx_games', JSON.stringify(kept)); } catch (err) {}
     renderResume();
   }
-  return live;
+  // Prefer resuming your own live game; a joinable waiting game is the
+  // fallback (wallet 2 joining wallet 1's game, same tag).
+  return liveOwn || liveJoin;
 }
 
 function createButtons() {
@@ -359,7 +371,9 @@ async function applyResumeButton() {
     b.disabled = false;
     if (live.level && b.dataset.level === live.level) {
       matched = true;
-      b.textContent = 'Resume game';
+      // Your own game: Resume. A waiting game you haven't joined yet:
+      // Join (opening it joins you via the socket, same game, same tag).
+      b.textContent = live.is_player === false ? 'Join game' : 'Resume game';
       b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(live.id); };
     }
   });
