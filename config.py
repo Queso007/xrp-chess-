@@ -91,7 +91,7 @@ def stake_drops(level_key: str) -> int:
 # -------------------------------------------------------------- timeouts
 # How long a player may go without a heartbeat before being treated as
 # having abandoned the game.
-ABANDON_TIMEOUT_SEC = int(os.environ.get("ABANDON_TIMEOUT_SEC", "90"))
+ABANDON_TIMEOUT_SEC = int(os.environ.get("ABANDON_TIMEOUT_SEC", "60"))
 # How often the frontend should send heartbeats (should be well under the
 # abandon timeout).
 HEARTBEAT_INTERVAL_SEC = int(os.environ.get("HEARTBEAT_INTERVAL_SEC", "15"))

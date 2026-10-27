@@ -81,7 +81,7 @@ class Game:
         level_cfg: dict,
         operator_address: str,
         escrow_address: str = "",
-        abandon_timeout: int = 90,
+        abandon_timeout: int = 60,
         preplay_abandon_timeout: int = 1800,
         deposit_timeout: int = 600,
         game_id: str | None = None,
@@ -367,7 +367,7 @@ class Game:
             # Someone walked away before stakes were locked: no contest,
             # refund whatever was deposited.
             # Pre-play uses a much longer silence window than mid-game:
-            # paying and switching wallets takes minutes, and the 90s
+            # paying and switching wallets takes minutes, and the 60s
             # mid-game timer would cancel games while players pay.
             # (DEPOSITING games still end at the 600s deposit deadline.)
             if any(now - p["last_heartbeat"] > self.preplay_abandon_timeout
