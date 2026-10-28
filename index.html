@@ -24,6 +24,8 @@
   .level h3 { margin:0 0 8px; color:var(--accent); }
   .level .stake { font-size:1.6rem; font-weight:800; margin:4px 0; }
   .level .meta { color:var(--muted); font-size:.85rem; margin-bottom:12px; }
+  .level button { display:block; width:100%; }
+  .level button + button { margin-top:8px; }
   .row { display:flex; gap:10px; }
   .row input { flex:1; }
   #qr { text-align:center; }
@@ -210,7 +212,8 @@ async function init() {
       <div class="stake">${lv.stake_xrp > 0 ? lv.stake_xrp + ' XRP' : 'FREE'}</div>
       <div class="meta">${lv.clock_seconds/60} min + ${lv.increment_seconds}s increment${lv.stake_xrp > 0 ? '' : ' · no deposit, just play'}</div>
       <button data-level="${key}">Create game</button>
-      <button class="ghost" data-find="${key}">Find opponent</button>`;
+      <button class="ghost" data-find="${key}">Find opponent</button>
+      <button class="ghost" data-resume="${key}" disabled>Resume game</button>`;
     box.appendChild(d);
   }
   box.querySelectorAll('button[data-level]').forEach(b => b.onclick = () => createGame(b.dataset.level));
@@ -287,9 +290,9 @@ function renderResume() {
 // something was dropped.
 async function pruneResumeList() {
   const list = savedGames();
-  if (!list.length) return null;
+  if (!list.length) return {};
   let changed = false;
-  let liveOwn = null, liveJoin = null;
+  const byLevel = {};
   const kept = [];
   for (const g of list) {
     try {
@@ -310,12 +313,17 @@ async function pruneResumeList() {
         kept.push(g);
         // Prefer the server's level (covers join-via-link saves with no level).
         const entry = {...g, level: s.level || g.level || '', is_player: isPlayer};
-        if (isPlayer) { if (!liveOwn) liveOwn = entry; }
-        else { if (!liveJoin) liveJoin = entry; }
+        // Per-level resume: your own game always wins the slot for its
+        // level; a joinable waiting game only fills an empty slot.
+        if (entry.level) {
+          if (isPlayer) byLevel[entry.level] = entry;
+          else if (!byLevel[entry.level]) byLevel[entry.level] = entry;
+        }
       } else if (s.state === 'depositing' || s.state === 'playing') {
         if (!isPlayer) { changed = true; continue; }
         kept.push(g);
-        if (!liveOwn) liveOwn = {...g, level: s.level || g.level || '', is_player: true};
+        const entry = {...g, level: s.level || g.level || '', is_player: true};
+        if (entry.level) byLevel[entry.level] = entry;
       } else {
         kept.push(g);
       }
@@ -325,66 +333,37 @@ async function pruneResumeList() {
     try { localStorage.setItem('cx_games', JSON.stringify(kept)); } catch (err) {}
     renderResume();
   }
-  // Prefer resuming your own live game; a joinable waiting game is the
-  // fallback (wallet 2 joining wallet 1's game, same tag).
-  return liveOwn || liveJoin;
+  // One resumable game per level: your own live game wins the slot,
+  // a joinable waiting game is the fallback for that level.
+  return byLevel;
 }
 
-function createButtons() {
-  return [...document.querySelectorAll('button[data-level]')];
-}
-
-function restoreCreateButtons() {
-  createButtons().forEach(b => {
-    b.textContent = 'Create game';
-    b.disabled = false;
-    const level = b.dataset.level;
-    b.onclick = () => createGame(level);
-  });
-  const instead = $('newGameInstead');
-  if (instead) instead.remove();
-}
-
-// If the player already has a live game, only the Create button for
-// THAT game's level becomes Resume pointing at it — other levels stay
-// Create, so a different level can still be started freely. Tapping
-// Create by accident on the same level while a game is alive is how
-// duplicate games (and mismatched tags) happen. Fail open: on any error
-// or timeout, Create stays Create.
+// Every level card has its own Resume button, driven by the pruned
+// per-level map: enabled only when that level has a live game to go
+// back to, disabled otherwise. Create always stays Create now — no
+// more morphing — so tapping Create on a level with a live game still
+// starts a fresh game on purpose, and Resume is the way back to the
+// old one. Fail open: on any error or timeout, all Resume buttons
+// stay disabled and Create/Find still work.
 async function applyResumeButton() {
-  const btns = createButtons();
+  const btns = [...document.querySelectorAll('button[data-resume]')];
   if (!btns.length) return;
-  restoreCreateButtons();
-  btns.forEach(b => { b.disabled = true; });
-  let live = null;
+  let byLevel = {};
   try {
-    live = await Promise.race([
+    byLevel = await Promise.race([
       pruneResumeList(),
-      new Promise(res => setTimeout(() => res(null), 5000)),
-    ]);
-  } catch (err) { live = null; }
-  if (!live) { btns.forEach(b => { b.disabled = false; }); return; }
-  // Per-level: only the button matching the live game's level becomes
-  // Resume; every other level keeps its Create button and handler.
-  let matched = false;
+      new Promise(res => setTimeout(() => res({}), 5000)),
+    ]) || {};
+  } catch (err) { byLevel = {}; }
   btns.forEach(b => {
+    const entry = byLevel[b.dataset.resume];
+    if (!entry) { b.disabled = true; b.textContent = 'Resume game'; return; }
     b.disabled = false;
-    if (live.level && b.dataset.level === live.level) {
-      matched = true;
-      // Your own game: Resume. A waiting game you haven't joined yet:
-      // Join (opening it joins you via the socket, same game, same tag).
-      b.textContent = live.is_player === false ? 'Join game' : 'Resume game';
-      b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(live.id); };
-    }
+    // Your own game: Resume. A waiting game you haven't joined yet:
+    // Join (opening it joins you via the socket, same game, same tag).
+    b.textContent = entry.is_player === false ? 'Join game' : 'Resume game';
+    b.onclick = () => { location.href = '/game.html?g=' + encodeURIComponent(entry.id); };
   });
-  if (matched && !$('newGameInstead')) {
-    const nb = document.createElement('button');
-    nb.id = 'newGameInstead';
-    nb.className = 'ghost';
-    nb.textContent = 'Start a new game instead';
-    nb.onclick = restoreCreateButtons;
-    $('resumeCard').appendChild(nb);
-  }
 }
 
 async function createGame(level) {
