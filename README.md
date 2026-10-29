@@ -104,8 +104,7 @@ server or seed is compromised, player funds are at risk. Operate accordingly:
 dedicated escrow wallet, minimal balance, hardened host, and say so plainly
 to your players.
 
-**(b) Abandonment is a forfeit.** A single abandon (disconnect or heartbeat
-timeout, 90 s default) is scored as a forfeit loss: the abandoner gets 0 XRP
+**(b) Abandonment is a forfeit.** A single abandon (a playing game only ends on checkmate, resignation, draw, or the chess clock; a game that never starts cancels and refunds) is scored as a forfeit loss: the abandoner gets 0 XRP
 back and the opponent is paid as the winner. Make sure this is unmissable in
 the UI before anyone stakes — a player with a flaky connection can lose their
 whole stake to a dropout. Consider a reconnection grace note in the rules
