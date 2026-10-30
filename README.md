@@ -80,10 +80,7 @@ Open http://localhost:5000. For phones on the same network, use your LAN IP.
 Every path conserves funds: payouts always sum to exactly 2·S (except
 cancellation, which refunds only what was deposited).
 
-**Forfeit rule:** abandoning (disconnect / heartbeat timeout) counts as a
-forfeit loss. The abandoner receives nothing; the remaining player is paid
-exactly like a decisive winner. This closes the "abandon to dodge a loss"
-loophole — there is no benefit to disconnecting instead of resigning.
+**Forfeit rule:** Abandonment is not a forfeit. A playing game ends only on checkmate, resignation, draw, or the chess clock flagging; a player going silent does not end the game. A game that never starts cancels and deposits are refunded in full."
 
 ## Submitting as a Xaman xApp
 
