@@ -72,7 +72,7 @@ Open http://localhost:5000. For phones on the same network, use your LAN IP.
 | Outcome | Winner / players | Operator |
 |---|---|---|
 | Decisive win (checkmate, resign, flag) | Winner: `S + S*9//10` | `S - S*9//10` (10% of loser's stake) |
-| **Single abandon → forfeit** | Abandoner: **0**. Other player wins: `S + S*9//10` | `S - S*9//10` |
+| **Disconnect during play | Game continues; ends only on checkmate, resign, draw, or clock flag
 | Draw (agreement, stalemate, 50-move, repetition, material) | Each: `S*95//100` | `2*(S - S*95//100)` |
 | Double abandon | Each: `S*975//1000` | `2*(S - S*975//1000)` |
 | Cancelled before play | Deposits refunded in full | 0 |
