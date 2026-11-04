@@ -35,9 +35,6 @@ export ESCROW_ADDRESS=rXXX...          # its public address
 export OPERATOR_ADDRESS=rXXX...        # YOUR wallet — receives the rake
 export XAMAN_API_KEY=xxxxxxxx
 export XAMAN_API_SECRET=xxxxxxxx
-
-#           DEPOSIT_TIMEOUT_SEC=600   PORT=5000
-
 cd backend
 python app.py
 ```
@@ -77,8 +74,6 @@ Open http://localhost:5000. For phones on the same network, use your LAN IP.
 | Cancelled before play | Deposits refunded in full | 0 |
 
 Every path conserves funds: payouts always sum to exactly 2·S (except
-cancellation, which refunds only what was deposited).
-
 **Disconnects do not end a game in progress. Silence or disconnect during a playing game does not forfeit it — the game ends only on checkmate, resignation, draw, or the chess clock flagging. The clock keeps running, so a disconnected player can still lose on time. If a game never starts (silence in WAITING/DEPOSITING, or the 600s deposit deadline passes), it cancels and deposits are refunded in full.
 ## Submitting as a Xaman xApp
 
@@ -99,7 +94,7 @@ server or seed is compromised, player funds are at risk. Operate accordingly:
 dedicated escrow wallet, minimal balance, hardened host, and say so plainly
 to your players.
 
-**(b) Abandonment.** A single abandon (a playing game only ends on checkmate, resignation, draw, or the chess clock; a game that never starts cancels and refunds) is scored as a forfeit loss: the abandoner gets 0 XRP
+**(b) Abandonment.** A single abandon (a playing game only ends on checkmate, resignation, draw, or the chess clock; a game that never starts cancels and refunds)
 back and the opponent is paid as the winner. Make sure this is unmissable in
 the UI before anyone stakes — a player with a flaky connection can lose their
 whole stake to a dropout. Consider a reconnection grace note in the rules
