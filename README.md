@@ -15,7 +15,7 @@ frontend (static HTML/JS)  ←→  Flask + SocketIO backend  ←→  XRPL (xrpl-
 ```
 
 The server is **authoritative**: moves are validated with python-chess, clocks
-tick server-side, and every end condition (checkmate, flag, forfeit, draw) is
+tick server-side, and every end condition (checkmate, flag,draw) is
 computed by the backend. Clients only render.
 
 ## Quickstart
@@ -94,11 +94,7 @@ server or seed is compromised, player funds are at risk. Operate accordingly:
 dedicated escrow wallet, minimal balance, hardened host, and say so plainly
 to your players.
 
-**(b) Abandonment.** A single abandon (a playing game only ends on checkmate, resignation, draw, or the chess clock; a game that never starts cancels and refunds)
-back and the opponent is paid as the winner. Make sure this is unmissable in
-the UI before anyone stakes — a player with a flaky connection can lose their
-whole stake to a dropout. Consider a reconnection grace note in the rules
-screen if you raise the timeout.
+**(b) Disconnects during play are not forfeits. A playing game ends only on checkmate, resignation, draw, or the chess clock flagging — a player with a flaky connection will not lose their whole stake to a dropout, though they can still lose on time. A game that never starts cancels and deposits are refunded in full.
 
 **(c) Real-money skill gaming needs legal compliance.** Operating this publicly
 means running a real-money game: check age-gating (21+/18+ depending on
@@ -112,4 +108,4 @@ taking a single stake. Test on testnet first, always.
 - All XRP amounts are integers (drops) end to end; floats never touch money.
 - Deposit matching requires the exact amount **and** the game's unique
   32-bit destination tag **and** a known player address.
-- Heartbeats + server-side clocks decide flags and forfeits, never the client.
+- Heartbeats + server-side clocks decide flags and never the client.
