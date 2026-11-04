@@ -35,7 +35,7 @@ export ESCROW_ADDRESS=rXXX...          # its public address
 export OPERATOR_ADDRESS=rXXX...        # YOUR wallet — receives the rake
 export XAMAN_API_KEY=xxxxxxxx
 export XAMAN_API_SECRET=xxxxxxxx
-# optional: DEV_MODE=true  ABANDON_TIMEOUT_SEC=90  HEARTBEAT_INTERVAL_SEC=15
+
 #           DEPOSIT_TIMEOUT_SEC=600   PORT=5000
 
 cd backend
@@ -74,14 +74,12 @@ Open http://localhost:5000. For phones on the same network, use your LAN IP.
 | Decisive win (checkmate, resign, flag) | Winner: `S + S*9//10` | `S - S*9//10` (10% of loser's stake) |
 | **Disconnect during play | Game continues; ends only on checkmate, resign, draw, or clock flag
 | Draw (agreement, stalemate, 50-move, repetition, material) | Each: `S*95//100` | `2*(S - S*95//100)` |
-| Double abandon | Each: `S*975//1000` | `2*(S - S*975//1000)` |
 | Cancelled before play | Deposits refunded in full | 0 |
 
 Every path conserves funds: payouts always sum to exactly 2·S (except
 cancellation, which refunds only what was deposited).
 
-**Forfeit rule:** Abandonment is not a forfeit. A playing game ends only on checkmate, resignation, draw, or the chess clock flagging; a player going silent does not end the game. A game that never starts cancels and deposits are refunded in full."
-
+**Disconnects do not end a game in progress. Silence or disconnect during a playing game does not forfeit it — the game ends only on checkmate, resignation, draw, or the chess clock flagging. The clock keeps running, so a disconnected player can still lose on time. If a game never starts (silence in WAITING/DEPOSITING, or the 600s deposit deadline passes), it cancels and deposits are refunded in full.
 ## Submitting as a Xaman xApp
 
 1. Register at the Xaman developer console (https://xaman.dev) and create an
