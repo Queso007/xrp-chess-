@@ -152,21 +152,45 @@ function showLobbyCards() {
 
 async function tryXappSignIn() {
   // Inside Xaman, the xApp opens with a one-time token (?xAppToken=...).
-  // Per Xaman's docs, the official SDK turns that token into the user's
-  // account — there is no backend endpoint for it (the earlier /api/auth/ott
-  // call 404'd on Xaman's side, which is why the last attempt failed).
-  // In a normal browser there is no token, so this silently does nothing
-  // and the regular QR flow below is used instead.
+  // No additional login: the token IS the login. The backend resolves it
+  // to the account via POST /api/auth/ott (server-side OTT exchange with
+  // Xaman), so the lobby identity comes from a validated token, not from
+  // anything the page claims on its own. If backend validation fails, fall
+  // back to the SDK's own account resolution so a backend hiccup does not
+  // lock the user out; if that fails too, the cached address / QR flow
+  // below takes over. In a normal browser there is no token, so this
+  // silently does nothing and the regular QR flow below is used instead.
   // ALWAYS validate when a token is present, even if an address is already
   // cached. The old `|| myAddress` skip meant switching wallets in Xaman
   // never updated the app's identity: the lobby and the game page kept
   // heartbeating as the old wallet while the new wallet never appeared,
-  // so the new wallet's side forfeited. The SDK account wins over cache.
+  // so the new wallet's side forfeited. The validated account wins over cache.
   const ott = new URLSearchParams(location.search).get('xAppToken');
   if (!ott) return 'absent';
   const s0 = $('xappStatus');
   s0.textContent = 'Signing you in via Xaman…';
   s0.classList.remove('hidden');
+  const finish = (account) => {
+    // Wallet switch: the validated account overwrites any cached address,
+    // so the game page heartbeats as the wallet actually signed in now.
+    myAddress = account;
+    sessionStorage.setItem('cx_address', myAddress);
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete('xAppToken');
+      history.replaceState(null, '', url.toString());
+    } catch (err) { /* token stays in URL; sign-in still counts */ }
+    showAuthed();
+  };
+  try {
+    const r = await fetch('/api/auth/ott', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ott})
+    });
+    const data = await r.json();
+    if (data.account) { finish(data.account); return 'ok'; }
+  } catch (err) { /* fall through to the SDK path */ }
   try {
     const Sdk = window.Xaman || window.Xumm;
     if (!Sdk) throw new Error('sdk missing');
@@ -176,16 +200,7 @@ async function tryXappSignIn() {
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
     ]);
     if (!account) throw new Error('no account');
-    // Wallet switch: the SDK account overwrites any cached address, so
-    // the game page heartbeats as the wallet actually signed in now.
-    myAddress = account;
-    sessionStorage.setItem('cx_address', myAddress);
-    try {
-      const url = new URL(location.href);
-      url.searchParams.delete('xAppToken');
-      history.replaceState(null, '', url.toString());
-    } catch (err) { /* token stays in URL; sign-in still counts */ }
-    showAuthed();
+    finish(account);
     return 'ok';
   } catch (err) { /* fall through to the cached address / QR flow */ }
   return 'failed';
