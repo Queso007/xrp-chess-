@@ -11,6 +11,10 @@ services:
         value: mainnet
       - key: DEV_MODE
         value: "false"
+      # Real-money stakes paused 2026-11-19 (licensing unresolved).
+      # Set to "true" only after the licensing question is resolved.
+      - key: REAL_MONEY_ENABLED
+        value: "false"
       - key: ESCROW_ADDRESS
         sync: false
       - key: ESCROW_SEED

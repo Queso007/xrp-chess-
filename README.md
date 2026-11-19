@@ -5,6 +5,13 @@ escrow wallet holds both stakes during play and pays out automatically when the
 game ends. Winner takes their stake plus **90% of the loser's stake**; the
 operator takes a **10% rake** on the loser's stake.
 
+> **Status (2026-11-19): real-money play is PAUSED.** The app currently runs
+> free play only (Practice games and vs Computer) while Pennsylvania licensing
+> is resolved. Staked levels are disabled server-side
+> (`REAL_MONEY_ENABLED=false`); no stakes or deposits can be created. To
+> restore real-money play, set `REAL_MONEY_ENABLED=true` — only after the
+> licensing question is resolved.
+
 ## Architecture
 
 ```
@@ -15,7 +22,7 @@ frontend (static HTML/JS)  ←→  Flask + SocketIO backend  ←→  XRPL (xrpl-
 ```
 
 The server is **authoritative**: moves are validated with python-chess, clocks
-tick server-side, and every end condition (checkmate, flag,draw) is
+tick server-side, and every end condition (checkmate, flag, forfeit, draw) is
 computed by the backend. Clients only render.
 
 ## Quickstart
@@ -35,6 +42,9 @@ export ESCROW_ADDRESS=rXXX...          # its public address
 export OPERATOR_ADDRESS=rXXX...        # YOUR wallet — receives the rake
 export XAMAN_API_KEY=xxxxxxxx
 export XAMAN_API_SECRET=xxxxxxxx
+# optional: DEV_MODE=true  ABANDON_TIMEOUT_SEC=90  HEARTBEAT_INTERVAL_SEC=15
+#           DEPOSIT_TIMEOUT_SEC=600   PORT=5000
+
 cd backend
 python app.py
 ```
@@ -69,12 +79,19 @@ Open http://localhost:5000. For phones on the same network, use your LAN IP.
 | Outcome | Winner / players | Operator |
 |---|---|---|
 | Decisive win (checkmate, resign, flag) | Winner: `S + S*9//10` | `S - S*9//10` (10% of loser's stake) |
-| **Disconnect during play | Game continues; ends only on checkmate, resign, draw, or clock flag
+| **Single abandon → forfeit** | Abandoner: **0**. Other player wins: `S + S*9//10` | `S - S*9//10` |
 | Draw (agreement, stalemate, 50-move, repetition, material) | Each: `S*95//100` | `2*(S - S*95//100)` |
+| Double abandon | Each: `S*975//1000` | `2*(S - S*975//1000)` |
 | Cancelled before play | Deposits refunded in full | 0 |
 
 Every path conserves funds: payouts always sum to exactly 2·S (except
-**Disconnects do not end a game in progress. Silence or disconnect during a playing game does not forfeit it — the game ends only on checkmate, resignation, draw, or the chess clock flagging. The clock keeps running, so a disconnected player can still lose on time. If a game never starts (silence in WAITING/DEPOSITING, or the 600s deposit deadline passes), it cancels and deposits are refunded in full.
+cancellation, which refunds only what was deposited).
+
+**Forfeit rule:** abandoning (disconnect / heartbeat timeout) counts as a
+forfeit loss. The abandoner receives nothing; the remaining player is paid
+exactly like a decisive winner. This closes the "abandon to dodge a loss"
+loophole — there is no benefit to disconnecting instead of resigning.
+
 ## Submitting as a Xaman xApp
 
 1. Register at the Xaman developer console (https://xaman.dev) and create an
@@ -94,7 +111,12 @@ server or seed is compromised, player funds are at risk. Operate accordingly:
 dedicated escrow wallet, minimal balance, hardened host, and say so plainly
 to your players.
 
-**(b) Disconnects during play are not forfeits. A playing game ends only on checkmate, resignation, draw, or the chess clock flagging — a player with a flaky connection will not lose their whole stake to a dropout, though they can still lose on time. A game that never starts cancels and deposits are refunded in full.
+**(b) Abandonment is a forfeit.** A single abandon (disconnect or heartbeat
+timeout, 90 s default) is scored as a forfeit loss: the abandoner gets 0 XRP
+back and the opponent is paid as the winner. Make sure this is unmissable in
+the UI before anyone stakes — a player with a flaky connection can lose their
+whole stake to a dropout. Consider a reconnection grace note in the rules
+screen if you raise the timeout.
 
 **(c) Real-money skill gaming needs legal compliance.** Operating this publicly
 means running a real-money game: check age-gating (21+/18+ depending on
@@ -108,4 +130,4 @@ taking a single stake. Test on testnet first, always.
 - All XRP amounts are integers (drops) end to end; floats never touch money.
 - Deposit matching requires the exact amount **and** the game's unique
   32-bit destination tag **and** a known player address.
-- Heartbeats + server-side clocks decide flags and never the client.
+- Heartbeats + server-side clocks decide flags and forfeits, never the client.

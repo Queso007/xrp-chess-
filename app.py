@@ -235,7 +235,12 @@ def levels():
             "clock_seconds": cfg["clock_seconds"],
             "increment_seconds": cfg["increment_seconds"],
         }
-    return jsonify({"levels": out, "dev_mode": config.DEV_MODE})
+    return jsonify({
+        "levels": out,
+        "dev_mode": config.DEV_MODE,
+        # Free-play only while real-money stakes are paused (2026-11-19).
+        "real_money_enabled": config.REAL_MONEY_ENABLED,
+    })
 
 
 @app.get("/api/diag/watcher")
@@ -257,6 +262,11 @@ def create_game():
     level = data.get("level")
     if level not in config.LEVELS:
         return jsonify({"error": f"unknown level: {level}"}), 400
+    # Server-side gate: while real-money play is paused, no staked game
+    # can be created through any path (the frontend hides the buttons too,
+    # but this is the enforcement). Free (practice) games are unaffected.
+    if config.LEVELS[level]["stake_xrp"] > 0 and not config.REAL_MONEY_ENABLED:
+        return jsonify({"error": "real-money games are paused — free play only"}), 403
     game = Game(
         level_key=level,
         level_cfg=config.LEVELS[level],
@@ -285,6 +295,10 @@ def find_or_create():
     address = data.get("address")
     if level not in config.LEVELS:
         return jsonify({"error": f"unknown level: {level}"}), 400
+    # Same server-side gate as /api/games/create: no staked Quick Play
+    # matchmaking while real-money play is paused.
+    if config.LEVELS[level]["stake_xrp"] > 0 and not config.REAL_MONEY_ENABLED:
+        return jsonify({"error": "real-money games are paused — free play only"}), 403
     if not address:
         return jsonify({"error": "address is required"}), 400
     with _games_lock:
@@ -346,6 +360,11 @@ def pay_payload(game_id: str):
     address = data.get("address")
     if game.practice:
         return jsonify({"error": "practice games have no stake"}), 400
+    # Server-side gate: no stake payment payload can be built while
+    # real-money play is paused, even for a staked game created before
+    # the pause (none survive a restart, but the gate holds regardless).
+    if not config.REAL_MONEY_ENABLED:
+        return jsonify({"error": "real-money games are paused — free play only"}), 403
     if game.state not in ("waiting", "depositing"):
         return jsonify({"error": f"cannot pay while {game.state}"}), 400
     player = game.players.get(address) if address else None

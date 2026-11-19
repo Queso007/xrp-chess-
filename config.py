@@ -25,6 +25,15 @@ def _require_env(name: str) -> str:
 # are logged instead of submitted. Never enable in production.
 DEV_MODE = os.environ.get("DEV_MODE", "false").strip().lower() in ("1", "true", "yes")
 
+# ------------------------------------------------------- real-money gate
+# Real-money stakes are PAUSED (2026-11-19, licensing unresolved): the app
+# runs free play only. With this off, the server refuses to create staked
+# games or build stake payment payloads; free (practice) games and the
+# vs-computer page keep working unchanged. To restore real-money play,
+# set the environment variable REAL_MONEY_ENABLED=true — and only after
+# the licensing question is resolved.
+REAL_MONEY_ENABLED = os.environ.get("REAL_MONEY_ENABLED", "false").strip().lower() in ("1", "true", "yes")
+
 # ------------------------------------------------------------- XRPL net
 # Production is mainnet: the escrow wallet and all stakes live there, so
 # the watcher must look at mainnet unless XRPL_NETWORK says otherwise.
